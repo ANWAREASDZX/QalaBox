@@ -1,0 +1,30 @@
+{
+  "id": "diablo2",
+  "name": "Diablo II",
+  "nameAr": "ديابلو 2",
+  "icon": "",
+  "exeCandidates": ["Game.exe", "Diablo II.exe"],
+  "arch": "auto",
+  "env": {
+    "BOX86_DYNAREC_STRONGMEM": "1",
+    "BOX64_DYNAREC_STRONGMEM": "1"
+  },
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3",
+    "adjmouse": "true"
+  },
+  "registry": [],
+  "launchArgs": "-w",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج وميض القوائم والخريطة",
+    "وضع النافذة عبر الوسيط -w لثبات أعلى",
+    "ذاكرة قوية لمنع انهيار عالم اللعبة المشترك",
+    "مطابقة حركة الماوس مع الدقة الافتراضية"
+  ],
+  "preset": "balanced",
+  "notesAr": "لعبة أدوار 2000 — ليست استراتيجية لكنها كانت الأكثر طلباً في ExaGear"
+}

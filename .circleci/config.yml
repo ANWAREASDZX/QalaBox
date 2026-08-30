@@ -1,0 +1,66 @@
+version: 2.1
+
+# ============================================================
+# QalaBox — بناء وتحقق كامل على CircleCI
+# المراحل: تجهيز SDK → assembleDebug → lintDebug → مخرجات
+# ============================================================
+
+jobs:
+  build:
+    docker:
+      - image: cimg/android:2026.08.1
+    environment:
+      TERM: xterm
+      GRADLE_OPTS: "-Dorg.gradle.daemon=false"
+    steps:
+      - checkout
+
+      - restore_cache:
+          keys:
+            - sdk-extras-v1-{{ arch }}
+
+      - run:
+          name: "تجهيز مكونات SDK (build-tools 34 / CMake 3.22.1 / NDK 26.1)"
+          command: |
+            yes | sdkmanager --licenses > /dev/null 2>&1 || true
+            sdkmanager --install "build-tools;34.0.0" "cmake;3.22.1" "ndk;26.1.10909125"
+
+      - save_cache:
+          key: sdk-extras-v1-{{ arch }}
+          paths:
+            - /home/circleci/android-sdk/build-tools/34.0.0
+            - /home/circleci/android-sdk/cmake/3.22.1
+            - /home/circleci/android-sdk/ndk/26.1.10909125
+
+      - restore_cache:
+          keys:
+            - gradle-deps-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "settings.gradle.kts" }}-{{ checksum "build.gradle.kts" }}-{{ checksum "app/build.gradle.kts" }}
+
+      - run:
+          name: "بناء حزمة APK (assembleDebug)"
+          command: |
+            chmod +x gradlew
+            ./gradlew --stacktrace assembleDebug
+
+      - run:
+          name: "فحص Lint الكامل (lintDebug)"
+          command: ./gradlew lintDebug
+
+      - store_artifacts:
+          path: app/build/outputs/apk/debug/app-debug.apk
+          destination: QalaBox-debug.apk
+
+      - store_artifacts:
+          path: app/build/reports
+          destination: reports
+
+      - save_cache:
+          key: gradle-deps-v1-{{ checksum "gradle/wrapper/gradle-wrapper.properties" }}-{{ checksum "settings.gradle.kts" }}-{{ checksum "build.gradle.kts" }}-{{ checksum "app/build.gradle.kts" }}
+          paths:
+            - ~/.gradle/caches
+            - ~/.gradle/wrapper
+
+workflows:
+  build-and-verify:
+    jobs:
+      - build

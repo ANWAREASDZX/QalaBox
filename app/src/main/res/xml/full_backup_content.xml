@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- قواعد النسخ الاحتياطي القديمة (أندرويد 10-11): نسخ احتياطي معطّل تماماً —
+     أنظمة الجذر والحاويات ضخمة ويُدار تصديرها من داخل التطبيق -->
+<full-backup-content>
+    <exclude domain="root" path="." />
+    <exclude domain="file" path="." />
+    <exclude domain="database" path="." />
+    <exclude domain="sharedpref" path="." />
+    <exclude domain="external" path="." />
+</full-backup-content>

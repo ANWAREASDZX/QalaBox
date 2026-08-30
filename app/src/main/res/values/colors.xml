@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- لوحة ألوان قلعة بوكس: ليلي رمادي داكن + ذهبي الحصون + أحمر الصلب -->
+    <color name="background">#0E1116</color>
+    <color name="surface">#171C23</color>
+    <color name="surface_high">#202731</color>
+    <color name="primary">#E0A83E</color>
+    <color name="on_primary">#1A1408</color>
+    <color name="primary_dim">#8A6B26</color>
+    <color name="accent_red">#C4452F</color>
+    <color name="text_primary">#ECEFF4</color>
+    <color name="text_secondary">#9AA5B4</color>
+    <color name="success">#5FA860</color>
+    <color name="emulator_scrim">#66000000</color>
+    <color name="emulator_button">#B31B2027</color>
+</resources>

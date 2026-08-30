@@ -1,0 +1,30 @@
+{
+  "id": "stronghold",
+  "name": "Stronghold Deluxe",
+  "nameAr": "سترونغهولد (اللعبة الأصلية)",
+  "icon": "",
+  "exeCandidates": ["Stronghold.exe"],
+  "arch": "auto",
+  "env": {
+    "BOX86_DYNAREC_STRONGMEM": "1",
+    "BOX64_DYNAREC_STRONGMEM": "1"
+  },
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3",
+    "noactivateapp": "true"
+  },
+  "registry": [],
+  "launchArgs": "",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج الرسوم المكسورة",
+    "حد الإطارات لثبات سرعة اللعبة",
+    "توجيه للأنوية الكبيرة",
+    "ضبط ذاكرة المترجم لاستقرار الحملات الطويلة"
+  ],
+  "preset": "balanced",
+  "notesAr": "الجزء الأول 2001 — نفس محرك كروزيدر"
+}

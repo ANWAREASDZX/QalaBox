@@ -1,0 +1,25 @@
+{
+  "id": "caesar3",
+  "name": "Caesar III",
+  "nameAr": "قيصر 3",
+  "icon": "",
+  "exeCandidates": ["c3.exe"],
+  "arch": "auto",
+  "env": {},
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3"
+  },
+  "registry": [],
+  "launchArgs": "",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج مشاكل تلوين المدينة",
+    "حد الإطارات لثبات المحاكاة الاقتصادية",
+    "تشغيل مباشر بلا تثبيت مسبق داخل الحاوية"
+  ],
+  "preset": "fast",
+  "notesAr": "بناء مدن كلاسيكي 1998 — خفيف جداً على المحاكي"
+}

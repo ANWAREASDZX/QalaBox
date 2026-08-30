@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- قرارات lint الموثقة لمشروع قلعة بوكس -->
+<lint>
+    <!-- قرار معماري: المحرك (Wine + Box86/64) يستهدف arm64-v8a حصراً —
+         دعم ChromeOS x86_64 غير مطلوب في هذه المرحلة -->
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+
+    <!-- بنية اعتماديات مثبتة ومتوافقة مع compileSdk 34 — الترقية الجماعية
+         لكثيرات AndroidX الأحدث تتطلب رفع compileSdk وتحتاج اختباراً مستقلاً -->
+    <issue id="GradleDependency" severity="ignore" />
+</lint>

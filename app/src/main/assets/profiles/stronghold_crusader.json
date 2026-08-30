@@ -1,0 +1,34 @@
+{
+  "id": "stronghold_crusader",
+  "name": "Stronghold Crusader",
+  "nameAr": "سترونغهولد كروزيدر",
+  "icon": "",
+  "exeCandidates": ["Crusader.exe", "Stronghold Crusader.exe", "Stronghold.exe"],
+  "arch": "auto",
+  "env": {
+    "BOX86_DYNAREC_STRONGMEM": "1",
+    "BOX64_DYNAREC_STRONGMEM": "1"
+  },
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3",
+    "noactivateapp": "true",
+    "singlecpu": "false"
+  },
+  "registry": [],
+  "launchArgs": "",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج الشاشة السوداء عند الإقلاع",
+    "حد 60 إطاراً لمنع تسارع اللعبة على المعالجات السريعة",
+    "ذاكرة قوية في المترجم لمنع انهيار الذكاء الاصطناعي",
+    "توجيه اللعبة إلى الأنوية الكبيرة لمعالجة بطء المؤشر",
+    "تخطي شاشات الفيديو المسببة للتجمد (احذف مجلد MOVIES إن تكررت المشكلة)",
+    "إيقاف تعارض التركيز عند فقد التركيز للنافذة"
+  ],
+  "preset": "balanced",
+  "notesAr": "استراتيجية القلاع 2002 — تُشغَّل بنمط 32 بت",
+  "notes": "ضع ملفات اللعبة في drive_c/Games ثم شغّل"
+}

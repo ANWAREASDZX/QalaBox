@@ -1,0 +1,25 @@
+{
+  "id": "pharaoh",
+  "name": "Pharaoh",
+  "nameAr": "فرعون",
+  "icon": "",
+  "exeCandidates": ["pharaoh.exe"],
+  "arch": "auto",
+  "env": {},
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3"
+  },
+  "registry": [],
+  "launchArgs": "",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج تشوه الخريطة النيلية",
+    "ثبات سرعة مرور الزمن في المدينة",
+    "توجيه للأنوية الكبيرة في المدن الضخمة"
+  ],
+  "preset": "fast",
+  "notesAr": "بناء مدن على ضفاف النيل 1999"
+}

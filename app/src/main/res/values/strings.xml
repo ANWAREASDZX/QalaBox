@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══════════════ عام ═══════════════ -->
+    <string name="app_name">قلعة بوكس</string>
+    <string name="ok">حسناً</string>
+    <string name="cancel">إلغاء</string>
+    <string name="delete">حذف</string>
+    <string name="rename">إعادة تسمية</string>
+    <string name="save">حفظ</string>
+    <string name="close">إغلاق</string>
+    <string name="confirm">تأكيد</string>
+    <string name="loading">جارٍ التحميل…</string>
+    <string name="yes">نعم</string>
+    <string name="no">لا</string>
+    <string name="done">تم</string>
+    <string name="error">حدث خطأ — راجع السجل</string>
+
+    <!-- ═══════════════ التنقل ═══════════════ -->
+    <string name="nav_games">الألعاب</string>
+    <string name="nav_containers">الحاويات</string>
+    <string name="nav_files">الملفات</string>
+    <string name="nav_settings">الإعدادات</string>
+
+    <!-- ═══════════════ وقت التشغيل ═══════════════ -->
+    <string name="runtime_not_installed">لم يتم تثبيت وقت التشغيل بعد (نواة Wine + Box64)</string>
+    <string name="runtime_install">تثبيت وقت التشغيل</string>
+    <string name="runtime_installing">جارٍ فك وتثبيت حزمة وقت التشغيل…</string>
+    <string name="runtime_installed">مثبّت — الإصدار: %1$s</string>
+    <string name="runtime_pick_hint">اختر ملف حزمة وقت التشغيل بصيغة .qbxruntime</string>
+    <string name="runtime_invalid">حزمة غير صالحة! تأكد من أنها حزمة قلعة بوكس الرسمية (تحتوي imagefs.tar و proot و version.json)</string>
+    <string name="runtime_pkg_title">حزمة وقت التشغيل</string>
+    <string name="runtime_ready">وقت التشغيل جاهز</string>
+
+    <!-- ═══════════════ الألعاب ═══════════════ -->
+    <string name="games_title">الألعاب الاستراتيجية</string>
+    <string name="games_empty">لا توجد بروفايلات — حدث خطأ في تثبيت التطبيق</string>
+    <string name="game_play">تشغيل</string>
+    <string name="game_settings">إعدادات اللعبة</string>
+    <string name="game_exe_not_found">لم يتم العثور على ملف اللعبة! انسخ ملفات اللعبة إلى الحاوية عبر تبويب «الملفات» ثم أعد المحاولة. الملفات المطلوبة: %1$s</string>
+    <string name="game_profile_applied">تم تطبيق بروفايل اللعبة وإصلاحاتها (%1$d إصلاح)</string>
+    <string name="game_add_manual">إضافة لعبة يدوياً</string>
+    <string name="game_pick_exe">مسار الملف التنفيذي داخل drive_c</string>
+    <string name="game_pick_exe_hint">مثال: Games/Stronghold Crusader/Crusader.exe</string>
+    <string name="game_missing_container">أنشئ حاوية أولاً من تبويب الحاويات</string>
+    <string name="select_container">الحاوية المستخدمة</string>
+    <string name="performance_preset">نمط الأداء</string>
+    <string name="game_default_preset">افتراضي (الإعدادات العامة)</string>
+    <string name="preset_fast">أقصى أداء</string>
+    <string name="preset_balanced">متوازن</string>
+    <string name="preset_compat">أقصى توافق</string>
+    <string name="fixes_applied">الإصلاحات المطبقة</string>
+
+    <!-- ═══════════════ الحاويات ═══════════════ -->
+    <string name="containers_title">حاويات Wine</string>
+    <string name="containers_empty">لا توجد حاويات — أنشئ حاوية لتبدأ</string>
+    <string name="container_create">حاوية جديدة</string>
+    <string name="container_name">اسم الحاوية</string>
+    <string name="container_resolution">دقة الشاشة الافتراضية</string>
+    <string name="container_gpu_driver">معرّف الرسوميات</string>
+    <string name="container_dxwrapper">غلاف DirectX</string>
+    <string name="container_arch">معمارية Windows</string>
+    <string name="container_creating">جارٍ إنشاء الحاوية (تهيئة Wine)…</string>
+    <string name="container_created">تم إنشاء الحاوية بنجاح</string>
+    <string name="container_delete_confirm">حذف الحاوية «%1$s» نهائياً مع كل ملفاتها؟ لا يمكن التراجع!</string>
+    <string name="container_backup">نسخ احتياطي</string>
+    <string name="container_restore">استعادة نسخة</string>
+    <string name="container_backed_up">تم حفظ النسخة الاحتياطية</string>
+    <string name="container_restored">تمت استعادة الحاوية</string>
+    <string name="container_reset_prefix">إعادة تهيئة Prefix</string>
+    <string name="container_reset_done">تمت إعادة تهيئة prefix</string>
+    <string name="res_800x600">800×600 (كلاسيكي)</string>
+    <string name="res_1024x768">1024×768</string>
+    <string name="res_1280x720">1280×720 (HD)</string>
+    <string name="res_1280x800">1280×800</string>
+    <string name="res_1920x1080">1920×1080 (Full HD)</string>
+    <string name="res_native">دقة الجهاز الأصلية</string>
+    <string name="driver_turnip">Turnip Vulkan (Adreno — الأفضل)</string>
+    <string name="driver_virgl">VirGL (متوافق مع كل الشرائح)</string>
+    <string name="driver_llvm">LLVMpipe (برمجي — بدون تسريع)</string>
+    <string name="dx_wined3d">WineD3D (OpenGL — الافتراضي)</string>
+    <string name="dx_dxvk">DXVK (Vulkan — للألعاب الأحدث)</string>
+    <string name="dx_cncddraw">cnc-ddraw (لألعاب DirectDraw الكلاسيكية)</string>
+    <string name="arch_win32">32 بت (win32 — موصى به)</string>
+    <string name="arch_win64">64 بت (win64 — تجريبي)</string>
+
+    <!-- ═══════════════ الملفات ═══════════════ -->
+    <string name="files_title">مدير الملفات</string>
+    <string name="files_import_zip">استيراد ZIP</string>
+    <string name="files_import_folder">استيراد مجلد</string>
+    <string name="files_up">للأعلى</string>
+    <string name="files_empty_dir">المجلد فارغ</string>
+    <string name="files_imported">تم الاستيراد بنجاح</string>
+    <string name="files_deleted">تم الحذف</string>
+    <string name="files_renamed">تمت إعادة التسمية</string>
+    <string name="files_copy_path">نسخ المسار</string>
+    <string name="files_path_copied">تم نسخ المسار</string>
+    <string name="files_importing">جارٍ الاستيراد… %1$s</string>
+    <string name="files_no_container">لا توجد حاويات</string>
+
+    <!-- ═══════════════ الإعدادات ═══════════════ -->
+    <string name="settings_title">الإعدادات</string>
+    <string name="perf_section">الأداء</string>
+    <string name="cpu_cores">الأنوية المستخدمة</string>
+    <string name="big_cores">تفضيل الأنوية الكبيرة (يحل بطء الماوس)</string>
+    <string name="dynarec_preset">إعدادات مترجم Box64/Box86</string>
+    <string name="graphics_section">الرسوميات</string>
+    <string name="fps_overlay">عرض عداد الإطارات</string>
+    <string name="input_section">اللمس والإدخال</string>
+    <string name="touch_mode">نمط اللمس</string>
+    <string name="mode_touchpad">لوحة لمس (اسحب لتحريك المؤشر)</string>
+    <string name="mode_direct">مباشر (اضغط حيث تريد النقر)</string>
+    <string name="sensitivity">حساسية المؤشر</string>
+    <string name="tap_delay">زمن النقر (مللي ثانية)</string>
+    <string name="buttons_size">حجم الأزرار على الشاشة</string>
+    <string name="buttons_opacity">شفافية الأزرار</string>
+    <string name="audio_section">الصوت</string>
+    <string name="audio_buffer">حجم التخزين الصوتي (يحل التقطيع)</string>
+    <string name="runtime_section">وقت التشغيل والسجلات</string>
+    <string name="logs_export">تصدير سجل آخر جلسة</string>
+    <string name="logs_clear">مسح كل السجلات</string>
+    <string name="logs_cleared">تم مسح السجلات</string>
+    <string name="about_section">حول التطبيق</string>
+    <string name="about_licenses">التراخيص والمصادر المفتوحة</string>
+    <string name="about_legal">تنبيه قانوني</string>
+    <string name="about_version">الإصدار %1$s</string>
+
+    <!-- ═══════════════ شاشة المحاكاة ═══════════════ -->
+    <string name="emu_exit">خروج</string>
+    <string name="emu_keyboard">لوحة المفاتيح</string>
+    <string name="emu_log">السجل</string>
+    <string name="emu_quick">إعدادات سريعة</string>
+    <string name="emu_screenshot">لقطة شاشة</string>
+    <string name="emu_screenshot_saved">تم حفظ اللقطة</string>
+    <string name="emu_exit_confirm">إنهاء اللعبة والخروج من المحاكي؟</string>
+    <string name="emu_starting">جارٍ تشغيل البيئة وتطبيق الإصلاحات…</string>
+    <string name="emu_start_failed">فشل التشغيل! راجع السجل للتفاصيل.</string>
+    <string name="emu_running">%1$s تعمل الآن</string>
+    <string name="emu_service_channel">جلسات المحاكاة</string>
+    <string name="emu_service_notif">قلعة بوكس تعمل الآن — انقر للعودة</string>
+    <string name="emu_fps">FPS: %1$d</string>
+    <string name="emu_xbridge_error">تعذر الاتصال بخادم X — تأكد من تثبيت حزمة وقت التشغيل كاملة</string>
+    <string name="emu_kbd_hint">لوحة المفاتيح: استخدم لوحة النظام أو أزرار الشاشة</string>
+
+    <!-- ═══════════════ متفرقات ═══════════════ -->
+    <string name="more_vert">⋮</string>
+    <string name="files_windows_path">C:\\</string>
+    <string name="notif_channel_emu">محاكاة قلعة بوكس</string>
+    <string name="license_wine">Wine — LGPL 2.1</string>
+    <string name="license_box64">Box64 / Box86 — MIT</string>
+    <string name="license_cncddraw">cnc-ddraw — GPL</string>
+    <string name="license_proot">PRoot — GPL 2.0</string>
+    <string name="legal_text">قلعة بوكس لا تتضمن أي ألعاب أو ملفات محمية بحقوق الملكية. يجب أن تملك نسخة أصلية من كل لعبة. لا توزع تطبيقك مع ملفات ExaGear الأصلية فهي ملكية خاصة وغير مرخصة.</string>
+</resources>

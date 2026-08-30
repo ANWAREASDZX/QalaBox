@@ -1,0 +1,32 @@
+{
+  "id": "red_alert_2",
+  "name": "Red Alert 2 / Yuri",
+  "nameAr": "ريد أليرت 2 ويوري",
+  "icon": "",
+  "exeCandidates": ["game.exe", "RA2MD.exe", "gamemd.exe", "RA2.exe"],
+  "arch": "auto",
+  "env": {
+    "BOX86_DYNAREC_STRONGMEM": "1",
+    "BOX64_DYNAREC_STRONGMEM": "1"
+  },
+  "dxWrapper": "cncddraw",
+  "cnc_ddraw_overrides": {
+    "renderer": "opengl",
+    "maxfps": "60",
+    "fullscreen": "true",
+    "hook": "3",
+    "noactivateapp": "true",
+    "singlecpu": "false"
+  },
+  "registry": [],
+  "launchArgs": "",
+  "fixes": [
+    "غلاف cnc-ddraw لعلاج الشاشة السوداء الشهيرة في RA2",
+    "منع تسارع سرعة اللعبة عبر حد 60 إطاراً",
+    "ذاكرة قوية لمنع انهيار ذكاء الخصم",
+    "تشغيل على الأنوية الكبيرة لإيقاع معارك سلس",
+    "تجاوز مشكلة فقدان التركيز مع شاشة اللمس"
+  ],
+  "preset": "balanced",
+  "notesAr": "يعمل عبر game.exe الأساسي أو RA2MD.exe ليوري"
+}
