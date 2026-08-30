@@ -2,9 +2,11 @@ package com.qalabox.emu.core
 
 import android.content.Context
 import android.net.Uri
+import com.qalabox.emu.R
 import com.qalabox.emu.util.Fs
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.TimeUnit
 import java.util.zip.ZipInputStream
 
 /**
@@ -25,16 +27,81 @@ object RuntimeManager {
     fun prootBin(context: Context): File = File(runtimeDir(context), "proot")
     fun xserverBin(context: Context): File = File(File(runtimeDir(context), "xserver"), "qalax11")
 
-    fun isInstalled(context: Context): Boolean =
-        prootBin(context).exists() &&
-                prootBin(context).canExecute() &&
-                File(rootfsDir(context), "bin").exists() &&
-                version(context) != null
+    fun isInstalled(context: Context): Boolean {
+        val p = prootBin(context)
+        if (!p.exists()) return false
+        // إصلاح ذاتي: استعادة بت التنفيذ إن فُقدت (بعض عمليات النسخ/الاستعادة تسقطها)
+        if (!p.canExecute() && !p.setExecutable(true, false)) return false
+        return hasRootfs(context) && version(context) != null
+    }
+
+    /** هل نظام الجذر مستكمل البنية؟ (bin أو usr/bin — حزمتنا تضع /bin حقيقياً) */
+    fun hasRootfs(context: Context): Boolean {
+        val rf = rootfsDir(context)
+        return File(rf, "bin").exists() || File(rf, "usr/bin").exists()
+    }
 
     fun version(context: Context): String? = try {
         val f = File(runtimeDir(context), "version.json")
         if (f.exists()) JSONObject(f.readText()).optString("version", "1.0") else null
     } catch (e: Exception) { null }
+
+    /**
+     * تشخيص سبب عدم الاعتراف بالتثبيت — null يعني أن كل شيء سليم.
+     * يُعرض السبب الدقيق في الإعدادات بدل رسالة «لم يُثبّت» الغامضة.
+     */
+    fun diagnose(context: Context): String? {
+        val p = prootBin(context)
+        if (!p.exists()) return context.getString(R.string.runtime_missing_proot)
+        if (!p.canExecute() && !p.setExecutable(true, false))
+            return context.getString(R.string.runtime_exec_blocked)
+        if (!hasRootfs(context)) return context.getString(R.string.runtime_missing_rootfs)
+        if (version(context) == null) return context.getString(R.string.runtime_missing_version)
+        return null
+    }
+
+    /**
+     * اختبار تنفيذ فعلي لـ proot (proot --version).
+     * يكشف قيود أندرويد W^X: التطبيقات ذات targetSdk ≥ 29 ممنوعة من تنفيذ
+     * أي ملف من مجلد بياناتها على أندرويد 10+ — يظهر ذلك كـ IOException هنا.
+     * بهذا لا يُعلن نجاح التثبيت أبداً على جهاز لا يستطيع تشغيل المحرك فيه.
+     */
+    fun probeProotExec(context: Context): Boolean {
+        return try {
+            val pb = ProcessBuilder(prootBin(context).absolutePath, "--version")
+            pb.redirectErrorStream(true)
+            val p = pb.start()
+            val out = p.inputStream.bufferedReader().use { it.readText().take(300) }
+            val finished = p.waitFor(8, TimeUnit.SECONDS)
+            val ok = finished && (p.exitValue() == 0 || out.contains("proot", ignoreCase = true))
+            if (!finished) p.destroyForcibly()
+            LogStore.append("Runtime", "اختبار تنفيذ proot: ${if (ok) "نجح" else "فشل"} (${out.trim()})")
+            ok
+        } catch (e: Exception) {
+            LogStore.append("Runtime", "اختبار تنفيذ proot فشل: ${e.message}")
+            false
+        }
+    }
+
+    /** تسطيح مجلد التفاف واحد — حزم أنشئت بـ tar من خارج الجذر (rootfs/bin/…) */
+    private fun repairRootfsLayout(context: Context) {
+        val rf = rootfsDir(context)
+        if (!rf.isDirectory || hasRootfs(context)) return
+        val kids = rf.listFiles() ?: return
+        if (kids.size != 1 || !kids[0].isDirectory) return
+        val wrapper = kids[0]
+        val looksLikeRoot = File(wrapper, "bin").isDirectory ||
+                File(wrapper, "usr/bin").isDirectory ||
+                File(wrapper, "etc").isDirectory
+        if (!looksLikeRoot) return
+        LogStore.append("Runtime", "تسطيح مجلد التفاف داخل الجذر: ${wrapper.name}")
+        var ok = true
+        wrapper.listFiles()?.forEach { c ->
+            ok = ok && c.renameTo(File(rf, c.name))
+        }
+        if (ok) wrapper.delete()
+        else LogStore.append("Runtime", "تعذر التسطيح الكامل — قد تحتاج إعادة تثبيت الحزمة")
+    }
 
     /**
      * تثبيت حزمة وقت التشغيل من URI (SAF).
@@ -99,7 +166,20 @@ object RuntimeManager {
                         entry = zis.nextEntry
                     }
                     if (!(gotImageFs && gotProot && gotVersion)) {
-                        return Result.failure(IllegalStateException("حزمة غير مكتملة"))
+                        return Result.failure(IllegalStateException(
+                            context.getString(R.string.runtime_invalid)))
+                    }
+                    // تحقق بنيوي من الجذر + إصلاح تلقائي لحزم ذات مجلد التفاف
+                    repairRootfsLayout(context)
+                    if (!hasRootfs(context)) {
+                        LogStore.append("Runtime", "نظام الجذر غير مكتمل بعد الفك")
+                        return Result.failure(IllegalStateException(
+                            context.getString(R.string.runtime_bad_rootfs)))
+                    }
+                    // اختبار تنفيذ صادق — يمنع «نجاحاً» وهمياً على أجهزة تمنع exec
+                    if (!probeProotExec(context)) {
+                        return Result.failure(IllegalStateException(
+                            context.getString(R.string.runtime_exec_blocked)))
                     }
                     LogStore.append("Runtime", "تم تثبيت وقت التشغيل: ${version(context)}")
                     return Result.success(version(context) ?: "1.0")

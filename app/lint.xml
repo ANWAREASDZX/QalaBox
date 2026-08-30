@@ -9,7 +9,9 @@
          لكثيرات AndroidX الأحدث تتطلب رفع compileSdk وتحتاج اختباراً مستقلاً -->
     <issue id="GradleDependency" severity="ignore" />
 
-    <!-- targetSdk 34 مقصود: رفعه إلى 35+ يفرض Edge-to-Edge وسلوكيات جديدة
-         تمس نافذة اللعبة وطبقة اللمس — يُرفع بعد اختبار ميداني على الأجهزة -->
+    <!-- targetSdk 28 مقصود وجوهري (راجع FIXES.md #35): أندرويد 10+ يمنع تنفيذ
+         ملفات مجلد بيانات التطبيق (W^X) للتطبيقات ذات targetSdk ≥ 29 — وtargetSdk 28
+         يبقي التطبيق في نطاق SELinux القديم الذي يسمح بتنفيذ ثنائيات المحاكي -->
     <issue id="OldTargetApi" severity="ignore" />
+    <issue id="ExpiredTargetSdkVersion" severity="ignore" />
 </lint>

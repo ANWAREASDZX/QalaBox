@@ -50,6 +50,25 @@ class SettingsFragment : Fragment() {
         buildUi()
     }
 
+    override fun onResume() {
+        super.onResume()
+        // إعادة فحص حالة وقت التشغيل عند كل عودة للشاشة — لا تسميات قديمة
+        versionLabel?.let { refreshRuntimeStatus(it) }
+    }
+
+    /** تحديث سطر حالة وقت التشغيل — مع السبب الدقيق عند عدم التثبيت */
+    private fun refreshRuntimeStatus(v: TextView) {
+        if (!isAdded) return
+        val ctx = requireContext()
+        v.text = if (RuntimeManager.isInstalled(ctx)) {
+            getString(R.string.runtime_installed, RuntimeManager.version(ctx) ?: "1.0")
+        } else {
+            val reason = RuntimeManager.diagnose(ctx)
+            if (reason.isNullOrEmpty()) getString(R.string.runtime_not_installed)
+            else getString(R.string.runtime_not_installed_reason, reason)
+        }
+    }
+
     /* ───────── أدوات بناء سريعة ───────── */
     private fun header(title: String): TextView = TextView(requireContext()).apply {
         text = title
@@ -114,11 +133,7 @@ class SettingsFragment : Fragment() {
         container.addView(header(getString(R.string.settings_title)))
 
         container.addView(header(getString(R.string.runtime_section)))
-        versionLabel = label(
-            if (RuntimeManager.isInstalled(ctx))
-                getString(R.string.runtime_installed, RuntimeManager.version(ctx) ?: "1.0")
-            else getString(R.string.runtime_not_installed)
-        )
+        versionLabel = label("").also { refreshRuntimeStatus(it) }
         container.addView(versionLabel)
         container.addView(button(getString(R.string.runtime_install)) {
             Toast.makeText(ctx, R.string.runtime_pick_hint, Toast.LENGTH_LONG).show()
@@ -226,10 +241,11 @@ class SettingsFragment : Fragment() {
             val r = RuntimeManager.installFromPackage(ctx, uri) { }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 progress.dismiss()
-                r.fold(onSuccess = { v ->
-                    versionLabel?.text = getString(R.string.runtime_installed, v)
+                r.fold(onSuccess = { _ ->
+                    versionLabel?.let { refreshRuntimeStatus(it) }
                     Toast.makeText(ctx, R.string.runtime_ready, Toast.LENGTH_SHORT).show()
                 }, onFailure = {
+                    versionLabel?.let { refreshRuntimeStatus(it) }
                     Toast.makeText(ctx, R.string.runtime_invalid, Toast.LENGTH_LONG).show()
                 })
             }

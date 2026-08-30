@@ -30,6 +30,12 @@
     <string name="runtime_invalid">حزمة غير صالحة! تأكد من أنها حزمة قلعة بوكس الرسمية (تحتوي imagefs.tar و proot و version.json)</string>
     <string name="runtime_pkg_title">حزمة وقت التشغيل</string>
     <string name="runtime_ready">وقت التشغيل جاهز</string>
+    <string name="runtime_not_installed_reason">لم يتم تثبيت وقت التشغيل بعد (نواة Wine + Box64)\nالسبب: %1$s</string>
+    <string name="runtime_missing_proot">ثنائي proot مفقود — أعد تثبيت حزمة وقت التشغيل</string>
+    <string name="runtime_missing_rootfs">نظام الجذر (imagefs) غير مكتمل — أعد تثبيت الحزمة</string>
+    <string name="runtime_missing_version">ملف الإصدار version.json مفقود — أعد تثبيت الحزمة</string>
+    <string name="runtime_exec_blocked">أندرويد يمنع تنفيذ مكوّنات المحاكي من مجلد بيانات التطبيق (سياسة W^X لأندرويد 10+ مع targetSdk الحديث). حدّث التطبيق إلى الإصدار 1.1.1 أو أحدث ثم أعد المحاولة</string>
+    <string name="runtime_bad_rootfs">نظام الجذر داخل الحزمة تالف أو فارغ — أعد بناء الحزمة وفق دليل RUNTIME_BINARIES</string>
 
     <!-- ═══════════════ الألعاب ═══════════════ -->
     <string name="games_title">الألعاب الاستراتيجية</string>

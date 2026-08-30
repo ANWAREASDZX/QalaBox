@@ -10,9 +10,14 @@ android {
     defaultConfig {
         applicationId = "com.qalabox.emu"
         minSdk = 29          // أندرويد 10+ كما تم الاتفاق
-        targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        // targetSdk 28 جوهري لعمل المحاكي (راجع docs/FIXES.md #35):
+        // أندرويد 10+ يمنع (W^X) التطبيقات ذات targetSdk ≥ 29 من تنفيذ أي ملف
+        // من مجلد بياناتها (SELinux) — فيتعذر تشغيل proot/box64 إطلاقاً.
+        // targetSdk 28 يبقي التطبيق في نطاق SELinux القديم untrusted_app_27
+        // الذي يسمح بالتنفيذ — وهو النمط المعتمد لدى Termux/Winlator/Mobox.
+        targetSdk = 28
+        versionCode = 3
+        versionName = "1.1.1"
         ndkVersion = "26.1.10909125"
         ndk {
             // محاكي للأجهزة الحقيقية ARM64 (أغلب هواتف أندرويد الحديثة)
