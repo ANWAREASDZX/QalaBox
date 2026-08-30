@@ -240,7 +240,8 @@ class SettingsFragment : Fragment() {
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val r = RuntimeManager.installFromPackage(ctx, uri) { msg ->
                 // تقدم حي في الحوار — مراحل الفك الطويلة لم تعد صندوقاً أسود
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                // (رد الاتصال من خيط عادي — النشر إلى Main عبر Handler)
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
                     if (progress.isShowing) progress.setMessage(msg)
                 }
             }
