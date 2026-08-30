@@ -5,14 +5,21 @@ import android.net.Uri
 import com.qalabox.emu.R
 import com.qalabox.emu.util.Fs
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
-import java.util.zip.ZipInputStream
+import java.util.zip.GZIPInputStream
 
 /**
  * مدير وقت التشغيل — يدير المكونات الثنائية (التي لا تُشحن مع التطبيق لأسباب
  * قانونية وحجمية): جذر النظام (Wine+Box86/64+Mesa)، proot، وخادم X.
  * التثبيت يتم من حزمة .qbxruntime عبر SAF — راجع docs/RUNTIME_BINARIES.md
+ *
+ * v1.2 — مستخرج حزم مرن: يقبل ZIP أو TAR أو TAR.GZ بأي بنية عملية
+ * (غلاف مجلد، rootfs.tar بدل imagefs.tar، صيغ .tgz، لاحقات إعادة التنزيل
+ * « (1)»، جذر متداخل داخل الـ tar) مع كشف الصيغة من البايتات الأولى،
+ * تفريغ مرحلي، إعادة تثبيت نظيفة، وتحقق مفصّل (راجع FIXES.md 39–42).
  */
 object RuntimeManager {
 
@@ -103,92 +110,199 @@ object RuntimeManager {
         else LogStore.append("Runtime", "تعذر التسطيح الكامل — قد تحتاج إعادة تثبيت الحزمة")
     }
 
+    /* ═══════════ المستخرج المرن (v1.2) ═══════════ */
+
+    private enum class PkgKind { ZIP, GZIP, TAR, UNKNOWN }
+
+    /** كشف الصيغة من البايتات الأولى: PK\x03\x04 (zip) / \x1f\x8b (gzip) / ustar (tar) */
+    private fun detectKind(input: InputStream): Pair<PkgKind, InputStream> {
+        val ins = BufferedInputStream(input, 1024 * 256)
+        ins.mark(320)
+        val head = ByteArray(300)
+        val n = ins.read(head)
+        ins.reset()
+        val ok = n >= 262
+        val kind = when {
+            ok && head[0] == 'P'.code.toByte() && head[1] == 'K'.code.toByte() &&
+                    head[2] == 3.toByte() && head[3] == 4.toByte() -> PkgKind.ZIP
+            ok && head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte() -> PkgKind.GZIP
+            ok && String(head, 257, 5, Charsets.US_ASCII) == "ustar" -> PkgKind.TAR
+            else -> PkgKind.UNKNOWN
+        }
+        return kind to ins
+    }
+
+    /** تطبيع مقطع مسار: حذف لاحقات إعادة التنزيل « (1)» قبل الامتداد وتوحيد الحالة */
+    private fun normSegment(s: String): String =
+        s.replace(Regex("\\s*\\(\\d+\\)(\\.[^.]+)?$"), "$1").trim().lowercase()
+
     /**
      * تثبيت حزمة وقت التشغيل من URI (SAF).
-     * بنية الحزمة (ZIP):
-     *   imagefs.tar      — نظام جذر glibc مع Wine + Box86/64 + Mesa + PulseAudio
-     *   proot            — ثنائي proot ثابت (arm64)
-     *   xserver/qalax11  — خادم X مبني لأندرويد (واجهة: -socketdir -screen)
-     *   version.json     — {"version":"...","notes":"..."}
-     *   dxwrapper/cnc-ddraw/ddraw.dll (اختياري) — غلاف DirectDraw
+     * الصيغة المرجعية (ZIP): imagefs.tar + proot + version.json
+     * (+ xserver/ و dxwrapper/ اختيارياً). ويُقبل إضافياً: TAR أو TAR.GZ مباشرة،
+     * غلاف مجلد واحد حول المحتويات، rootfs.tar / imagefs.tar.gz / .tgz،
+     * لاحقات إعادة التنزيل، والجذر المتداخل داخل الـ tar.
+     * المراحل: كشف الصيغة ← تفريغ مرحلي ← توجيه المكونات ← تحقق مبدئي ←
+     * تنظيف القديم ← فك الجذر ← تسطيح ← تحقق بنيوي ← اختبار تنفيذ صادق.
      */
     fun installFromPackage(
         context: Context,
         uri: Uri,
         onProgress: (String) -> Unit
     ): Result<String> {
-        return try {
+        var staging: File? = null
+        try {
             onProgress("فتح الحزمة…")
             val resolver = context.contentResolver
-            resolver.openInputStream(uri)?.use { input ->
-                ZipInputStream(input.buffered(1024 * 256)).use { zis ->
-                    var entry = zis.nextEntry
-                    var gotImageFs = false; var gotProot = false; var gotVersion = false
-                    while (entry != null) {
-                        val name = entry.name.trimStart('/')
-                        // حماية من مسارات التطفل (Zip Slip)
-                        if (name.contains("..") || name.startsWith("/")) {
-                            LogStore.append("Runtime", "إدخال مشبوه مرفوض: $name")
-                            entry = zis.nextEntry
-                            continue
-                        }
-                        when {
-                            name == "imagefs.tar" && !entry.isDirectory -> {
-                                onProgress("فك نظام الجذر (قد يستغرق دقائق)…")
-                                Fs.extractTar(zis, rootfsDir(context))
-                                gotImageFs = true
-                            }
-                            name == "proot" && !entry.isDirectory -> {
-                                val out = prootBin(context)
-                                out.parentFile?.mkdirs()
-                                out.outputStream().use { zis.copyTo(it) }
-                                out.setExecutable(true, false)
-                                gotProot = true
-                            }
-                            name.startsWith("xserver/") && !entry.isDirectory -> {
-                                val out = File(runtimeDir(context), name)
-                                out.parentFile?.mkdirs()
-                                out.outputStream().use { zis.copyTo(it) }
-                                out.setExecutable(true, false)
-                            }
-                            name.startsWith("dxwrapper/") && !entry.isDirectory -> {
-                                val out = File(runtimeDir(context), name)
-                                out.parentFile?.mkdirs()
-                                out.outputStream().use { zis.copyTo(it) }
-                                out.setExecutable(true, false)
-                            }
-                            name == "version.json" && !entry.isDirectory -> {
-                                File(runtimeDir(context), "version.json")
-                                    .outputStream().use { zis.copyTo(it) }
-                                gotVersion = true
-                            }
-                        }
-                        entry = zis.nextEntry
-                    }
-                    if (!(gotImageFs && gotProot && gotVersion)) {
-                        return Result.failure(IllegalStateException(
-                            context.getString(R.string.runtime_invalid)))
-                    }
-                    // تحقق بنيوي من الجذر + إصلاح تلقائي لحزم ذات مجلد التفاف
-                    repairRootfsLayout(context)
-                    if (!hasRootfs(context)) {
-                        LogStore.append("Runtime", "نظام الجذر غير مكتمل بعد الفك")
-                        return Result.failure(IllegalStateException(
-                            context.getString(R.string.runtime_bad_rootfs)))
-                    }
-                    // اختبار تنفيذ صادق — يمنع «نجاحاً» وهمياً على أجهزة تمنع exec
-                    if (!probeProotExec(context)) {
-                        return Result.failure(IllegalStateException(
-                            context.getString(R.string.runtime_exec_blocked)))
-                    }
-                    LogStore.append("Runtime", "تم تثبيت وقت التشغيل: ${version(context)}")
-                    return Result.success(version(context) ?: "1.0")
+            val input = resolver.openInputStream(uri)
+                ?: return Result.failure(IllegalStateException("تعذر فتح الملف"))
+
+            input.use { base ->
+                val (kind, stream) = detectKind(base)
+                LogStore.append("Runtime", "صيغة الحزمة المكتشفة: $kind")
+                if (kind == PkgKind.UNKNOWN) {
+                    return Result.failure(IllegalStateException(
+                        "صيغة غير معروفة — المطلوب ZIP أو TAR أو TAR.GZ"))
                 }
+
+                // 1) تفريغ الحزمة كاملة إلى مجلد مرحلي (مسار موحد لكل الصيغ)
+                val st = File(context.filesDir, "staging_pkg")
+                Fs.deleteRecursively(st)
+                st.mkdirs()
+                staging = st
+                onProgress("فك الحزمة…")
+                val extracted = when (kind) {
+                    PkgKind.ZIP -> Fs.unzipTo(stream, st)
+                    PkgKind.GZIP -> GZIPInputStream(stream).use { Fs.extractTar(it, st) }
+                    PkgKind.TAR -> Fs.extractTar(stream, st)
+                    PkgKind.UNKNOWN -> false
+                }
+                if (!extracted) {
+                    return Result.failure(IllegalStateException("تعذر فك الحزمة — قد تكون تالفة"))
+                }
+
+                // 2) توجيه المكونات الصغيرة أولاً — لا نمسّ الجذر القديم قبل اليقين
+                onProgress("قراءة مكونات الحزمة…")
+                var gotProot = false
+                var gotVersion = false
+                var pendingImageFs: File? = null
+                var pendingImageFsGz = false
+
+                val files = st.walkTopDown().filter { it.isFile }.toList()
+                for (f in files) {
+                    val segs = try {
+                        f.relativeTo(st).path.split(File.separatorChar).map { normSegment(it) }
+                    } catch (e: Exception) { continue }
+                    val bn = segs.last()
+                    when {
+                        bn == "imagefs.tar" || bn == "rootfs.tar" -> {
+                            pendingImageFs = f; pendingImageFsGz = false
+                        }
+                        bn == "imagefs.tar.gz" || bn == "imagefs.tgz" ||
+                                bn == "rootfs.tar.gz" || bn == "rootfs.tgz" -> {
+                            pendingImageFs = f; pendingImageFsGz = true
+                        }
+                        bn == "proot" -> {
+                            val out = prootBin(context)
+                            out.parentFile?.mkdirs()
+                            f.copyTo(out, overwrite = true)
+                            out.setExecutable(true, false)
+                            out.setReadable(true, false)
+                            gotProot = true
+                        }
+                        bn == "version.json" -> {
+                            val out = File(runtimeDir(context), "version.json")
+                            out.parentFile?.mkdirs()
+                            f.copyTo(out, overwrite = true)
+                            gotVersion = true
+                        }
+                        else -> {
+                            // xserver/… و dxwrapper/… — بالتعرف عبر أي سلف في المسار
+                            val xs = segs.indexOf("xserver")
+                            val dw = segs.indexOf("dxwrapper")
+                            val idx = if (xs >= 0) xs else dw
+                            if (idx >= 0 && idx < segs.lastIndex) {
+                                val rel = segs.subList(idx, segs.size).joinToString("/")
+                                val out = File(runtimeDir(context), rel)
+                                out.parentFile?.mkdirs()
+                                f.copyTo(out, overwrite = true)
+                                out.setExecutable(true, false)
+                            }
+                        }
+                    }
+                }
+
+                // 3) تحديد مصدر نظام الجذر: ملف tar، أو مجلد imagefs/rootfs، أو الحزمة نفسها
+                var rootfsSource: File? = pendingImageFs
+                var sourceIsGz = pendingImageFsGz
+                if (rootfsSource == null) {
+                    val dirs = st.walkTopDown().filter { it.isDirectory }.take(400).toList()
+                    val dirRoot = dirs.firstOrNull { d ->
+                        val n = normSegment(d.name)
+                        (n == "imagefs" || n == "rootfs") &&
+                                (File(d, "bin").exists() || File(d, "usr/bin").exists() ||
+                                        File(d, "usr").exists() || File(d, "etc").exists())
+                    }
+                    val bareRoot = if (File(st, "bin").exists() || File(st, "usr/bin").exists() ||
+                        File(st, "usr").exists() || File(st, "etc").exists()) st else null
+                    rootfsSource = dirRoot ?: bareRoot
+                    sourceIsGz = false
+                }
+
+                // 4) تحقق مبدئي — قبل العبث بالتثبيت القديم (فشل مبكر لا يدمّر شيئاً)
+                val missing = mutableListOf<String>()
+                if (rootfsSource == null) missing.add("imagefs (نظام الجذر)")
+                if (!gotProot) missing.add("proot")
+                if (!gotVersion) missing.add("version.json")
+                if (missing.isNotEmpty()) {
+                    LogStore.append("Runtime", "حزمة ناقصة: ${missing.joinToString("، ")}")
+                    return Result.failure(IllegalStateException(
+                        "ناقص: ${missing.joinToString("، ")}"))
+                }
+
+                // 5) فك نظام الجذر — مع تنظيف القديم أولاً (إعادة تثبيت نظيفة)
+                onProgress("فك نظام الجذر (قد يستغرق دقائق)…")
+                val rd = rootfsDir(context)
+                Fs.deleteRecursively(rd)
+                rd.mkdirs()
+                val src = rootfsSource!!
+                if (src == st) {
+                    st.listFiles()?.forEach { c ->
+                        val dst = File(rd, c.name)
+                        if (!c.renameTo(dst)) Fs.recursiveCopy(c, dst)
+                    }
+                } else if (!sourceIsGz) {
+                    src.inputStream().buffered(1024 * 256).use { Fs.extractTar(it, rd) }
+                } else {
+                    GZIPInputStream(src.inputStream().buffered(1024 * 256)).use { Fs.extractTar(it, rd) }
+                }
+
+                // 6) تسطيح الجذر المتداخل (imagefs/imagefs/bin ← imagefs/bin)
+                repairRootfsLayout(context)
+
+                // 7) تحقق بنيوي من الجذر
+                if (!hasRootfs(context)) {
+                    LogStore.append("Runtime", "نظام الجذر غير مكتمل بعد الفك")
+                    return Result.failure(IllegalStateException(
+                        context.getString(R.string.runtime_bad_rootfs)))
+                }
+
+                // 8) اختبار تنفيذ صادق — يمنع «نجاحاً» وهمياً على أجهزة تمنع exec
+                if (!probeProotExec(context)) {
+                    return Result.failure(IllegalStateException(
+                        context.getString(R.string.runtime_exec_blocked)))
+                }
+
+                LogStore.append("Runtime",
+                    "تم تثبيت وقت التشغيل: ${version(context)} — الجذر ${Fs.humanSize(Fs.dirSize(rd))}")
+                onProgress("اكتمل التثبيت")
+                return Result.success(version(context) ?: "1.0")
             }
-            Result.failure(IllegalStateException("تعذر فتح الملف"))
         } catch (e: Exception) {
             LogStore.append("Runtime", "خطأ تثبيت: ${e.message}")
-            Result.failure(e)
+            return Result.failure(e)
+        } finally {
+            staging?.let { Fs.deleteRecursively(it) }
         }
     }
 

@@ -238,7 +238,12 @@ class SettingsFragment : Fragment() {
             .setCancelable(false).create()
         progress.show()
         lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val r = RuntimeManager.installFromPackage(ctx, uri) { }
+            val r = RuntimeManager.installFromPackage(ctx, uri) { msg ->
+                // تقدم حي في الحوار — مراحل الفك الطويلة لم تعد صندوقاً أسود
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    if (progress.isShowing) progress.setMessage(msg)
+                }
+            }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 progress.dismiss()
                 r.fold(onSuccess = { _ ->
@@ -246,7 +251,11 @@ class SettingsFragment : Fragment() {
                     Toast.makeText(ctx, R.string.runtime_ready, Toast.LENGTH_SHORT).show()
                 }, onFailure = {
                     versionLabel?.let { refreshRuntimeStatus(it) }
-                    Toast.makeText(ctx, R.string.runtime_invalid, Toast.LENGTH_LONG).show()
+                    // التفاصيل الدقيقة (المكوّن الناقص / سبب الفشل) داخل الرسالة نفسها
+                    val detail = it.message?.let { m -> "\n" + m } ?: ""
+                    Toast.makeText(ctx,
+                        getString(R.string.runtime_invalid) + detail,
+                        Toast.LENGTH_LONG).show()
                 })
             }
         }
