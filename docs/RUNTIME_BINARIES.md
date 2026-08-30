@@ -3,7 +3,24 @@
 قلعة بوكس مفصولة عمداً عن الثنائيات الكبيرة (Wine/Box64/…) لأسباب قانونية وحجمية.
 هذا الدليل يبني الحزمة من **مصادر مفتوحة 100%** على جهاز لينكس (أو WSL2).
 
-## محتويات الحزمة (ZIP واحد)
+## ⚡ الطريقة الآلية (موصى بها) — سكربت واحد
+
+الطريقة اليدوية أدناه صالحة، لكن يوجد الآن سكربت يبني كل شيء **آلياً بدون qemu
+ولا chroot** — يبني جذر Debian بحل اعتماديات `.deb` مباشرة:
+
+```bash
+bash runtime-src/build_runtime_package.sh out/
+# الناتج: out/qalabox-runtime.qbxruntime + build-manifest.txt + version.json
+```
+
+- يتضمن: جذر Debian arm64 (Xvfb/PulseAudio/X11/Mesa/خطوط) + مكتبات الضيف
+  amd64/i386 + **Wine** (بناءات Kron4ek) + **Box64/Box86** (بناء cross بـ dynarec)
+  + **qalarender** مُجمّع مسبقاً + **proot** ثابت + **cnc-ddraw** + التغليف النهائي
+- وضع تحقق سريع من الجذر فقط: `DRY=1 bash runtime-src/build_runtime_package.sh out/`
+- نفس السكربت يعمل على CircleCI (منظمة QalaBox — تعريف `qalabox-runtime`) ويضع
+  الحزمة artifact جاهزة للتنزيل. المتغيرات: `SUITE WINE_TAG BOX64_TAG BOX86_TAG`
+
+## المحتويات (ZIP واحد)
 
 ```
 qalabox-runtime.zip  (غيّر الامتداد إلى .qbxruntime)
