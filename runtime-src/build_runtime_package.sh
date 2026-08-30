@@ -239,7 +239,11 @@ if [ "$DRY" != 1 ]; then
     -DCMAKE_EXE_LINKER_FLAGS="--sysroot=$ROOT" \
     -DCMAKE_INSTALL_PREFIX=/usr/local
   cmake --build "$WORK/box64/build" -j "$(nproc)"
-  make -C "$WORK/box64/build" install DESTDIR="$ROOT" >/dev/null
+  # box64 0.4.x لا يولّد قاعدة install دائماً — نسخ يدوي موثوق
+  mkdir -p "$ROOT/usr/local/bin" "$ROOT/usr/local/etc"
+  cp "$WORK/box64/build/box64" "$ROOT/usr/local/bin/box64"
+  [ -f "$WORK/box64/system/box64.box64rc" ] && \
+    cp "$WORK/box64/system/box64.box64rc" "$ROOT/usr/local/etc/box64.box64rc" || true
   [ -x "$ROOT/usr/local/bin/box64" ] || die "box64 لم يُثبَّت"
   BOX64_VERSION="Box64 $BOX64_TAG"
 
@@ -256,7 +260,10 @@ if [ "$DRY" != 1 ]; then
     -DCMAKE_EXE_LINKER_FLAGS="--sysroot=$ROOT" \
     -DCMAKE_INSTALL_PREFIX=/usr/local
   cmake --build "$WORK/box86/build" -j "$(nproc)"
-  make -C "$WORK/box86/build" install DESTDIR="$ROOT" >/dev/null
+  mkdir -p "$ROOT/usr/local/bin" "$ROOT/usr/local/etc"
+  cp "$WORK/box86/build/box86" "$ROOT/usr/local/bin/box86"
+  [ -f "$WORK/box86/system/box86.box86rc" ] && \
+    cp "$WORK/box86/system/box86.box86rc" "$ROOT/usr/local/etc/box86.box86rc" || true
   [ -x "$ROOT/usr/local/bin/box86" ] || die "box86 لم يُثبَّت"
   BOX86_VERSION="Box86 $BOX86_TAG"
 
