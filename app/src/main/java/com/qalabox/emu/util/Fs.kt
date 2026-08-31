@@ -143,7 +143,7 @@ object Fs {
                         }
                         // v1.3: التنفيذ من بتات الوضع في الترويسة — أسرع (بلا
                         // syscall لكل ملف) وأصح (الملفات النصية تبقى غير تنفيذية)
-                        if (mode and 0o111 != 0) outFile.setExecutable(true, false)
+                        if (mode and 0x49 != 0) outFile.setExecutable(true, false)
                     }
                     '2' -> { // رابط رمزي — جوهري لصحة rootfs (ld-linux، lib*.so …)
                         var linkTarget = pendingPaxLink ?: parseTarName(buf, 157, 100)
@@ -165,7 +165,7 @@ object Fs {
                         if (src.exists()) {
                             outFile.parentFile?.mkdirs()
                             src.copyTo(outFile, overwrite = true)
-                            if (mode and 0o111 != 0) outFile.setExecutable(true, false)
+                            if (mode and 0x49 != 0) outFile.setExecutable(true, false)
                         }
                     }
                     else -> skipTarData(input, size) // أجهزة/أدلة أخرى: تجاهل بأمان
