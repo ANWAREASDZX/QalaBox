@@ -142,17 +142,25 @@ class FilesFragment : Fragment() {
     private fun navigateTo(dir: File) {
         currentDir = dir
         pathLabel.text = windowsStylePath(dir)
-        files.clear()
-        try {
-            dir.listFiles()?.let { list ->
-                files.addAll(list.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() }))
+        // v1.3: القوائم الثقيلة (مجلد ألعاب بآلاف الملفات) تُقرأ خارج الخيط الرئيسي
+        lifecycleScope.launch(Dispatchers.IO) {
+            val listed = mutableListOf<File>()
+            try {
+                dir.listFiles()?.let { list ->
+                    listed.addAll(list.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() }))
+                }
+            } catch (e: Exception) {
+                LogStore.append("Files", "تعذر قراءة المجلد: ${e.message}")
             }
-        } catch (e: Exception) {
-            LogStore.append("Files", "تعذر قراءة المجلد: ${e.message}")
+            withContext(Dispatchers.Main) {
+                if (currentDir != dir) return@withContext // تنقّل أحدث أثناء القراءة
+                files.clear()
+                files.addAll(listed)
+                recycler.adapter?.notifyDataSetChanged()
+                emptyView.findViewById<TextView>(R.id.empty_text)?.text = getString(R.string.files_empty_dir)
+                emptyView.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
+            }
         }
-        recycler.adapter?.notifyDataSetChanged()
-        emptyView.findViewById<TextView>(R.id.empty_text)?.text = getString(R.string.files_empty_dir)
-        emptyView.visibility = if (files.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun windowsStylePath(f: File): String {
@@ -236,11 +244,7 @@ class FilesFragment : Fragment() {
         pm.setOnMenuItemClickListener { item ->
             when (item.title) {
                 getString(R.string.rename) -> showRename(f)
-                getString(R.string.delete) -> {
-                    Fs.deleteRecursively(f)
-                    Toast.makeText(requireContext(), R.string.files_deleted, Toast.LENGTH_SHORT).show()
-                    currentDir?.let { navigateTo(it) }
-                }
+                getString(R.string.delete) -> confirmDelete(f)
                 getString(R.string.files_copy_path) -> {
                     val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("path", windowsStylePath(f)))
@@ -265,6 +269,32 @@ class FilesFragment : Fragment() {
                 }
             }
             .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** حذف خارج الخيط الرئيسي — مجلد لعبة كبير كان يجمّد الواجهة حتى ANR (v1.3) */
+    private fun confirmDelete(f: File) {
+        val ctx = requireContext()
+        MaterialAlertDialogBuilder(ctx)
+            .setMessage(getString(R.string.files_confirm_delete, f.name))
+            .setPositiveButton(R.string.yes) { _, _ ->
+                val progress = androidx.appcompat.app.AlertDialog.Builder(ctx)
+                    .setMessage(R.string.loading).setCancelable(false).create()
+                progress.show()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val ok = Fs.deleteRecursively(f)
+                    withContext(Dispatchers.Main) {
+                        if (isAdded) {
+                            progress.dismiss()
+                            Toast.makeText(ctx,
+                                if (ok) R.string.files_deleted else R.string.error,
+                                Toast.LENGTH_SHORT).show()
+                            currentDir?.let { navigateTo(it) }
+                        }
+                    }
+                }
+            }
+            .setNegativeButton(R.string.no, null)
             .show()
     }
 

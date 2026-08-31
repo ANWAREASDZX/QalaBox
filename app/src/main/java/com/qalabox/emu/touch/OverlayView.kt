@@ -87,12 +87,18 @@ class OverlayView @JvmOverloads constructor(
         }
     }
 
-    /** استلام صورة المؤشر من الجسر الأصلي (ARGB) — الإحداثيات بإحداثيات الضيف */
+    /** استلام صورة المؤشر من الجسر الأصلي (ARGB) — الإحداثيات بإحداثيات الضيف
+     *  v1.3: الصورة النقطية تُعاد استخدامهما عند ثبات الأبعاد — كان يُبنى
+     *  كائن Bitmap جديد كل حزمة مؤشر (~12/ثانية) = ضغط GC بلا داعٍ */
     fun onCursorData(x: Int, y: Int, w: Int, h: Int, hotX: Int, hotY: Int, pixels: IntArray?) {
         if (w <= 0 || h <= 0 || pixels == null || pixels.size < w * h) return
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        var bmp = cursor
+        if (bmp == null || bmp.width != w || bmp.height != h) {
+            if (bmp != null && !bmp.isRecycled) bmp.recycle()
+            bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            cursor = bmp
+        }
         bmp.setPixels(pixels, 0, w, 0, 0, w, h)
-        cursor = bmp
         hotspotX = hotX
         hotspotY = hotY
         /* تحويل موضع الجذر X إلى الشاشة عبر مستطيل العرض */
@@ -109,6 +115,13 @@ class OverlayView @JvmOverloads constructor(
     fun onTouchFeedbackEnd() {
         touchX = -1f; touchY = -1f
         postInvalidateOnAnimation()
+    }
+
+    override fun onDetachedFromWindow() {
+        // تحرير الصورة النقطية عند مغادرة الشاشة — بلا تسريب ذاكرة رسومية
+        cursor?.let { if (!it.isRecycled) it.recycle() }
+        cursor = null
+        super.onDetachedFromWindow()
     }
 
     override fun onDraw(canvas: Canvas) {

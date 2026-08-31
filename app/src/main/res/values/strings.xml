@@ -97,6 +97,7 @@
     <string name="files_empty_dir">المجلد فارغ</string>
     <string name="files_imported">تم الاستيراد بنجاح</string>
     <string name="files_deleted">تم الحذف</string>
+    <string name="files_confirm_delete">حذف «%1$s» نهائياً؟ لا يمكن التراجع!</string>
     <string name="files_renamed">تمت إعادة التسمية</string>
     <string name="files_copy_path">نسخ المسار</string>
     <string name="files_path_copied">تم نسخ المسار</string>

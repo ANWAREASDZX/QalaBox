@@ -20,6 +20,17 @@ import java.util.zip.GZIPInputStream
  * (غلاف مجلد، rootfs.tar بدل imagefs.tar، صيغ .tgz، لاحقات إعادة التنزيل
  * « (1)»، جذر متداخل داخل الـ tar) مع كشف الصيغة من البايتات الأولى،
  * تفريغ مرحلي، إعادة تثبيت نظيفة، وتحقق مفصّل (راجع FIXES.md 39–42).
+ *
+ * v1.3 — دورة تثبيت مضادة للارتداد (راجع FIXES.md 43–47):
+ *   1) version.json يُتحقق من صلاحيته JSON فعلياً عند التثبيت، وقراءته
+ *      تتحمل BOM — لم يعد ممكناً «نجاح» ثم فشل كشف لاحق لاختلاف المعيار.
+ *   2) فك الجذر يتم في مجلد مرحلي ثم *تبديل ذرّي* (rename) — أي انقطاع
+ *      في منتصف الفك يترك الجذر القديم سليماً بدل حالة ناقصة.
+ *   3) بعد كل تثبيت يُطوى اختبار isInstalled الحقيقي نفسه — لا يُعلن
+ *      النجاح أبداً إلا إذا كانت نفس الدالة التي ستُقرأ لاحقاً في
+ *      الإعدادات ترى تثبيتاً كاملاً (ضمان اتساق الكتابة مع القراءة).
+ *   4) مسح أذونات التنفيذ على مجلدات bin بعد التثبيت — حزم ZIP المصدرية
+ *      لا تحمل بت التنفيذ فتكان يُثبَّت الجذر ثم يفشل الإطلاق.
  */
 object RuntimeManager {
 
@@ -48,10 +59,20 @@ object RuntimeManager {
         return File(rf, "bin").exists() || File(rf, "usr/bin").exists()
     }
 
+    /** قراءة version.json — متحملة BOM وفضاءات، وتعيد null فقط للملف الغائب/التالف */
     fun version(context: Context): String? = try {
         val f = File(runtimeDir(context), "version.json")
-        if (f.exists()) JSONObject(f.readText()).optString("version", "1.0") else null
+        if (f.exists()) {
+            val text = f.readText().trim().trimStart('\uFEFF')
+            JSONObject(text).optString("version", "1.0").ifBlank { "1.0" }
+        } else null
     } catch (e: Exception) { null }
+
+    /** تحقق أن محتوى version.json قابل للتحليل JSON (يُستخدم أثناء التثبيت) */
+    private fun isValidVersionJson(content: String): Boolean = try {
+        JSONObject(content.trim().trimStart('\uFEFF'))
+        true
+    } catch (e: Exception) { false }
 
     /**
      * تشخيص سبب عدم الاعتراف بالتثبيت — null يعني أن كل شيء سليم.
@@ -91,9 +112,8 @@ object RuntimeManager {
     }
 
     /** تسطيح مجلد التفاف واحد — حزم أنشئت بـ tar من خارج الجذر (rootfs/bin/…) */
-    private fun repairRootfsLayout(context: Context) {
-        val rf = rootfsDir(context)
-        if (!rf.isDirectory || hasRootfs(context)) return
+    private fun repairRootfsLayoutDir(rf: File) {
+        if (!rf.isDirectory) return
         val kids = rf.listFiles() ?: return
         if (kids.size != 1 || !kids[0].isDirectory) return
         val wrapper = kids[0]
@@ -108,6 +128,29 @@ object RuntimeManager {
         }
         if (ok) wrapper.delete()
         else LogStore.append("Runtime", "تعذر التسطيح الكامل — قد تحتاج إعادة تثبيت الحزمة")
+    }
+
+    /**
+     * منح بت التنفيذ لثنائيات الجذر في مواضع bin المعروفة.
+     * لماذا: ملفات ZIP لا تحمل بت التنفيذ أصلاً — بدون هذا المسح يفشل
+     * إطلاق wine/box64 بعد «تثبيت ناجح» إذا جاء الجذر من ZIP مباشرة.
+     */
+    private fun ensureRootfsExecBits(rootfs: File) {
+        val binDirs = listOf(
+            "bin", "sbin", "usr/bin", "usr/sbin", "usr/local/bin",
+            "usr/local/sbin", "usr/libexec", "usr/games"
+        )
+        var count = 0
+        for (rel in binDirs) {
+            val d = File(rootfs, rel)
+            if (!d.isDirectory) continue
+            d.listFiles()?.forEach { f ->
+                if (f.isFile && !f.setExecutable(true, false)) {
+                    LogStore.append("Runtime", "تعذر منح تنفيذ: ${f.path}")
+                } else count++
+            }
+        }
+        LogStore.append("Runtime", "أذونات التنفيذ: $count ملفاً في مواضع bin")
     }
 
     /* ═══════════ المستخرج المرن (v1.2) ═══════════ */
@@ -185,6 +228,7 @@ object RuntimeManager {
                 onProgress("قراءة مكونات الحزمة…")
                 var gotProot = false
                 var gotVersion = false
+                var versionValid = true
                 var pendingImageFs: File? = null
                 var pendingImageFsGz = false
 
@@ -211,10 +255,18 @@ object RuntimeManager {
                             gotProot = true
                         }
                         bn == "version.json" -> {
-                            val out = File(runtimeDir(context), "version.json")
-                            out.parentFile?.mkdirs()
-                            f.copyTo(out, overwrite = true)
-                            gotVersion = true
+                            // v1.3: تحقق محتوى JSON هنا — حزمة بversion.json تالفة
+                            // تُرفض الآن برسالة واضحة بدل «نجاح» يرتد لاحقاً إلى غير مثبت
+                            val content = try { f.readText() } catch (e: Exception) { "" }
+                            if (isValidVersionJson(content)) {
+                                val out = File(runtimeDir(context), "version.json")
+                                out.parentFile?.mkdirs()
+                                f.copyTo(out, overwrite = true)
+                                gotVersion = true
+                            } else {
+                                versionValid = false
+                                LogStore.append("Runtime", "version.json داخل الحزمة غير صالح JSON")
+                            }
                         }
                         else -> {
                             // xserver/… و dxwrapper/… — بالتعرف عبر أي سلف في المسار
@@ -239,12 +291,15 @@ object RuntimeManager {
                     val dirs = st.walkTopDown().filter { it.isDirectory }.take(400).toList()
                     val dirRoot = dirs.firstOrNull { d ->
                         val n = normSegment(d.name)
-                        (n == "imagefs" || n == "rootfs") &&
+                        // أقواس صريحة — كانت الأسبقية تُشمل imagefs بلا بنية جذر (v1.3)
+                        ((n == "imagefs" || n == "rootfs") &&
                                 (File(d, "bin").exists() || File(d, "usr/bin").exists() ||
-                                        File(d, "usr").exists() || File(d, "etc").exists())
+                                        File(d, "usr").exists() || File(d, "etc").exists()))
                     }
                     val bareRoot = if (File(st, "bin").exists() || File(st, "usr/bin").exists() ||
-                        File(st, "usr").exists() || File(st, "etc").exists()) st else null
+                        (File(st, "usr").exists() && File(st, "xserver").exists() == false &&
+                                File(st, "dxwrapper").exists() == false) ||
+                        File(st, "etc").exists()) st else null
                     rootfsSource = dirRoot ?: bareRoot
                     sourceIsGz = false
                 }
@@ -254,43 +309,76 @@ object RuntimeManager {
                 if (rootfsSource == null) missing.add("imagefs (نظام الجذر)")
                 if (!gotProot) missing.add("proot")
                 if (!gotVersion) missing.add("version.json")
+                if (!versionValid) missing.add("version.json (محتوى JSON غير صالح)")
                 if (missing.isNotEmpty()) {
                     LogStore.append("Runtime", "حزمة ناقصة: ${missing.joinToString("، ")}")
                     return Result.failure(IllegalStateException(
                         "ناقص: ${missing.joinToString("، ")}"))
                 }
 
-                // 5) فك نظام الجذر — مع تنظيف القديم أولاً (إعادة تثبيت نظيفة)
+                // 5) فك نظام الجذر — في مجلد *مرحلي* ثم تبديل ذرّي (v1.3):
+                //    أي فشل/انقطاع أثناء الفك يترك الجذر القديم سليماً —
+                //    لا توجد نافذة يظهر فيها «تثبيت ناقص» للمستخدم أبداً
                 onProgress("فك نظام الجذر (قد يستغرق دقائق)…")
                 val rd = rootfsDir(context)
-                Fs.deleteRecursively(rd)
-                rd.mkdirs()
+                val stageRd = File(context.filesDir, "imagefs.staging")
+                Fs.deleteRecursively(stageRd)
+                stageRd.mkdirs()
                 val src = rootfsSource!!
                 if (src == st) {
                     st.listFiles()?.forEach { c ->
-                        val dst = File(rd, c.name)
+                        val dst = File(stageRd, c.name)
                         if (!c.renameTo(dst)) Fs.recursiveCopy(c, dst)
                     }
                 } else if (!sourceIsGz) {
-                    src.inputStream().buffered(1024 * 256).use { Fs.extractTar(it, rd) }
+                    src.inputStream().buffered(1024 * 256).use { Fs.extractTar(it, stageRd) }
                 } else {
-                    GZIPInputStream(src.inputStream().buffered(1024 * 256)).use { Fs.extractTar(it, rd) }
+                    GZIPInputStream(src.inputStream().buffered(1024 * 256)).use { Fs.extractTar(it, stageRd) }
                 }
 
-                // 6) تسطيح الجذر المتداخل (imagefs/imagefs/bin ← imagefs/bin)
-                repairRootfsLayout(context)
+                // 6) تسطيح الجذر المتداخل (imagefs/imagefs/bin ← imagefs/bin) — داخل المرحلي
+                repairRootfsLayoutDir(stageRd)
 
-                // 7) تحقق بنيوي من الجذر
-                if (!hasRootfs(context)) {
-                    LogStore.append("Runtime", "نظام الجذر غير مكتمل بعد الفك")
+                // 7) تحقق بنيوي من الجذر *قبل* المساس بالتثبيت القديم
+                val stageOk = File(stageRd, "bin").exists() || File(stageRd, "usr/bin").exists()
+                if (!stageOk) {
+                    Fs.deleteRecursively(stageRd)
+                    LogStore.append("Runtime", "نظام الجذر غير مكتمل بعد الفك — أُبقي القديم سليماً")
                     return Result.failure(IllegalStateException(
                         context.getString(R.string.runtime_bad_rootfs)))
                 }
 
-                // 8) اختبار تنفيذ صادق — يمنع «نجاحاً» وهمياً على أجهزة تمنع exec
+                // 8) التبديل الذرّي: القديم → سلة ثم المرحلي → مكانه (rename على نفس نظام الملفات)
+                val trash = File(context.filesDir, "imagefs.old")
+                Fs.deleteRecursively(trash)
+                if (rd.exists() && !rd.renameTo(trash)) {
+                    // نادر: فشل rename — نحذف القديم ونكمل (المرحلي مكتمل بنيوياً)
+                    Fs.deleteRecursively(rd)
+                }
+                if (!stageRd.renameTo(rd)) {
+                    Fs.recursiveCopy(stageRd, rd)
+                    Fs.deleteRecursively(stageRd)
+                }
+                Fs.deleteRecursively(trash)
+
+                // 9) مسح أذونات التنفيذ — حزم ZIP المصدرية تسقط بت التنفيذ،
+                //    بدونه يُثبَّت الجذر «بنجاح» ثم يفشل إطلاق wine/box64 فوراً
+                onProgress("ضبط أذونات التنفيذ…")
+                ensureRootfsExecBits(rd)
+
+                // 10) اختبار تنفيذ صادق — يمنع «نجاحاً» وهمياً على أجهزة تمنع exec
                 if (!probeProotExec(context)) {
                     return Result.failure(IllegalStateException(
                         context.getString(R.string.runtime_exec_blocked)))
+                }
+
+                // 11) تحقق ذاتي نهائي بنفس معيار القراءة لاحقاً في الإعدادات —
+                //     يضمن أن ما سنكتبه الآن هو تماماً ما ستراه isInstalled غداً
+                val selfDiag = diagnose(context)
+                if (selfDiag != null || !isInstalled(context)) {
+                    LogStore.append("Runtime", "تحقق ذاتي فاشل بعد التثبيت: $selfDiag")
+                    return Result.failure(IllegalStateException(
+                        selfDiag ?: context.getString(R.string.runtime_bad_rootfs)))
                 }
 
                 LogStore.append("Runtime",

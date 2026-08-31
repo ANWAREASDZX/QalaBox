@@ -233,8 +233,21 @@ class ContainersFragment : Fragment() {
         MaterialAlertDialogBuilder(requireContext())
             .setMessage(getString(R.string.container_delete_confirm, c.name))
             .setPositiveButton(R.string.yes) { _, _ ->
-                ContainerManager.delete(requireContext(), c)
-                refresh()
+                // v1.3: حذف الجيجابايتات خارج الخيط الرئيسي — كان يجمّد الواجهة حتى ANR
+                val ctx = requireContext()
+                val progress = androidx.appcompat.app.AlertDialog.Builder(ctx)
+                    .setMessage(R.string.loading).setCancelable(false).create()
+                progress.show()
+                lifecycleScope.launch(Dispatchers.IO) {
+                    val ok = ContainerManager.delete(ctx, c)
+                    withContext(Dispatchers.Main) {
+                        if (isAdded) {
+                            progress.dismiss()
+                            if (!ok) Toast.makeText(ctx, R.string.error, Toast.LENGTH_SHORT).show()
+                            refresh()
+                        }
+                    }
+                }
             }
             .setNegativeButton(R.string.no, null)
             .show()

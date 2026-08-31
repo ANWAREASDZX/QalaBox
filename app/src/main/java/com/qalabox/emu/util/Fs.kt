@@ -5,19 +5,33 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 
-/** أدوات نظام ملفات عامة: فك الضغط، النسخ، بحث، تحرير INI */
+/** أدوات نظام ملفات عامة: فك الضغط، النسخ، بحث، تحرير INI
+ *
+ * v1.3 إصلاحات:
+ *  - استهلاك كامل لبيانات ترويسات GNU 'L' / PAX 'x' الأكبر من 1MB (كان
+ *    يستقر التدفق بعدها وتُفكّ بيانات تالفة بصمت)
+ *  - بتات الوضع من ترويسة tar تحدد التنفيذ (أسرع وأصح من منح الكل)
+ *  - دعم PAX linkpath= للروابط الرمزية الطويلة (>100 حرف)
+ *  - فحص Zip Slip بنص المسار أولاً (بلا syscalls مكلفة لكل مدخل)
+ *  - deleteRecursively لا يتبع الروابط الرمزية للمجلدات
+ */
 object Fs {
 
     /** فك أرشيف ZIP مع حماية من هجوم Path Traversal (Zip Slip) */
     fun unzipTo(input: InputStream, destDir: File): Boolean {
         destDir.mkdirs()
+        val destCanon = destDir.canonicalPath + File.separator
         try {
             ZipInputStream(input.buffered(1024 * 256)).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
-                    val outFile = File(destDir, entry.name)
-                    // حماية Zip Slip
-                    if (!outFile.canonicalPath.startsWith(destDir.canonicalPath + File.separator) &&
+                    val name = entry.name
+                    // فحص سريع بنص المسار — يغني عن canonicalPath لكل مدخل (v1.3)
+                    val suspicious = name.startsWith('/') || name.contains('\\') ||
+                            name.split('/', '\\').any { it == ".." }
+                    val outFile = File(destDir, name)
+                    if (suspicious &&
+                        !outFile.canonicalPath.startsWith(destCanon) &&
                         outFile.canonicalPath != destDir.canonicalPath) {
                         entry = zis.nextEntry
                         continue
@@ -50,7 +64,8 @@ object Fs {
         destDir.mkdirs()
         val buf = ByteArray(512)
         var pendingLongName: String? = null   // GNU 'L'
-        var pendingPaxPath: String? = null    // PAX 'x'
+        var pendingPaxPath: String? = null    // PAX 'x' — path=
+        var pendingPaxLink: String? = null    // PAX 'x' — linkpath= (v1.3)
         try {
             var marker = input.read(buf, 0, 512)
             while (marker == 512) {
@@ -58,6 +73,8 @@ object Fs {
                 val sizeStr = String(buf, 124, 12, Charsets.US_ASCII).trim('\u0000', ' ')
                 val size = if (sizeStr.isEmpty()) 0L else sizeStr.toLong(8)
                 val typeFlag = buf[156].toInt().toChar()
+                val modeStr = String(buf, 100, 8, Charsets.US_ASCII).trim('\u0000', ' ')
+                val mode = modeStr.toIntOrNull(8) ?: 0
                 val prefix = if (buf[345].toInt() != 0) parseTarName(buf, 345, 155) else ""
                 var relPath = (if (prefix.isNotEmpty()) prefix + "/" + name else name)
 
@@ -67,20 +84,30 @@ object Fs {
                 when (typeFlag) {
                     // GNU LongName: البيانات التالية هي الاسم الحقيقي للإدخال القادم
                     'L' -> {
-                        val nb = ByteArray(size.toInt().coerceAtMost(1 shl 20))
-                        readExact(input, nb, size)
-                        val endIdx = nb.indexOf(0).let { if (it < 0) nb.size else it }
-                        pendingLongName = String(nb, 0, endIdx, Charsets.UTF_8)
+                        // v1.3: استهلاك كامل لكل بايتات الاسم مهما كان حجمها —
+                        // القديم كان يقرأ 1MB كحد أقصى ثم يستقر التدفق (فك تالف صامت)
+                        pendingLongName = readAllToString(input, size)
+                        if (pendingLongName == null) {
+                            // حجم غير منطقي — تخطّ الكتلة المحشوّة كاملةً حفاظاً على التزامن
+                            skipTarData(input, size)
+                            marker = input.read(buf, 0, 512)
+                            continue
+                        }
                         skipTarData(input, size, consumed = size)
                         marker = input.read(buf, 0, 512)
                         continue
                     }
-                    // PAX Extended Header: استخرج مسار= من البيانات
+                    // PAX Extended Header: استخرج path= و linkpath= من البيانات
                     'x', 'X' -> {
-                        val pb = ByteArray(size.toInt().coerceAtMost(1 shl 20))
-                        readExact(input, pb, size)
-                        pendingPaxPath = parsePaxPath(pb)
-                        skipTarData(input, size, consumed = size)
+                        // v1.3: قراءة كاملة ثم تحليل — نفس علاج انحراف التدفق أعلاه
+                        val pb = readAllBytes(input, size)
+                        if (pb != null) {
+                            pendingPaxPath = parsePaxValue(pb, "path=") ?: pendingPaxPath
+                            pendingPaxLink = parsePaxValue(pb, "linkpath=")
+                            skipTarData(input, size, consumed = size)
+                        } else {
+                            skipTarData(input, size)
+                        }
                         marker = input.read(buf, 0, 512)
                         continue
                     }
@@ -114,11 +141,13 @@ object Fs {
                         FileOutputStream(outFile).use { fos ->
                             copyExact(input, fos, size)
                         }
-                        // تنفيذ للمالك يكفي — الملفات داخل تخزين التطبيق الخاص (نفس UID)
-                        outFile.setExecutable(true)
+                        // v1.3: التنفيذ من بتات الوضع في الترويسة — أسرع (بلا
+                        // syscall لكل ملف) وأصح (الملفات النصية تبقى غير تنفيذية)
+                        if (mode and 0o111 != 0) outFile.setExecutable(true, false)
                     }
                     '2' -> { // رابط رمزي — جوهري لصحة rootfs (ld-linux، lib*.so …)
-                        val linkTarget = parseTarName(buf, 157, 100)
+                        var linkTarget = pendingPaxLink ?: parseTarName(buf, 157, 100)
+                        pendingPaxLink = null
                         try {
                             outFile.parentFile?.mkdirs()
                             outFile.delete()
@@ -129,12 +158,14 @@ object Fs {
                         skipTarData(input, size)
                     }
                     '1' -> { // رابط صلب: انسخ الهدف إن وجد
-                        val linkTarget = parseTarName(buf, 157, 100)
+                        val linkTarget = pendingPaxLink ?: parseTarName(buf, 157, 100)
+                        pendingPaxLink = null
                         val src = File(destDir, linkTarget)
                         skipTarData(input, size)
                         if (src.exists()) {
                             outFile.parentFile?.mkdirs()
                             src.copyTo(outFile, overwrite = true)
+                            if (mode and 0o111 != 0) outFile.setExecutable(true, false)
                         }
                     }
                     else -> skipTarData(input, size) // أجهزة/أدلة أخرى: تجاهل بأمان
@@ -148,8 +179,31 @@ object Fs {
         }
     }
 
-    /** استخرج قيمة path= من ترويسة PAX */
-    private fun parsePaxPath(data: ByteArray): String? {
+    /** اقرأ كامل بيانات الـ tar (حجم معلوم) — بلا سقف خفي؛ null للحجم غير المنطقي */
+    private fun readAllBytes(input: InputStream, size: Long): ByteArray? {
+        if (size <= 0 || size > 16L * 1024 * 1024) {
+            // سقف حماية 16MB — المستخرج العادي لا يرى ترويسات بهذا الحجم
+            return null
+        }
+        val out = ByteArray(size.toInt())
+        var got = 0
+        while (got < out.size) {
+            val n = input.read(out, got, out.size - got)
+            if (n <= 0) break
+            got += n
+        }
+        return out
+    }
+
+    /** اقرأ كامل بيانات الـ tar إلى نص (أسماء GNU 'L') مع قص عند أول NUL */
+    private fun readAllToString(input: InputStream, size: Long): String? {
+        val b = readAllBytes(input, size) ?: return null
+        val endIdx = b.indexOf(0).let { if (it < 0) b.size else it }
+        return String(b, 0, endIdx, Charsets.UTF_8)
+    }
+
+    /** استخرج قيمة مفتاح مثل path= أو linkpath= من ترويسة PAX الخام */
+    private fun parsePaxValue(data: ByteArray, key: String): String? {
         var i = 0
         while (i < data.size) {
             var sp = i
@@ -158,21 +212,10 @@ object Fs {
             val lenStr = String(data, i, sp - i, Charsets.US_ASCII).toIntOrNull() ?: break
             if (lenStr <= 0 || i + lenStr > data.size) break
             val rec = String(data, sp + 1, i + lenStr - sp - 1, Charsets.UTF_8)
-            if (rec.startsWith("path=")) return rec.substring(5)
+            if (rec.startsWith(key)) return rec.substring(key.length)
             i += lenStr
         }
         return null
-    }
-
-    private fun readExact(input: InputStream, buf: ByteArray, size: Long) {
-        var remaining = size
-        var got = 0
-        while (remaining > 0 && got < buf.size) {
-            val n = input.read(buf, got, minOf(remaining, (buf.size - got).toLong()).toInt())
-            if (n <= 0) break
-            got += n
-            remaining -= n
-        }
     }
 
     private fun parseTarName(buf: ByteArray, off: Int, len: Int): String {
@@ -230,14 +273,24 @@ object Fs {
         }
     }
 
-    /** حذف تكراري آمن */
+    /** حذف تكراري آمن — لا يتبع الروابط الرمزية للمجلدات (حماية من حذف خارج الجذر) */
     fun deleteRecursively(file: File): Boolean {
-        if (!file.exists()) return true
+        val mode = fileMode(file)
+        if (mode == 0) return true                    // غير موجود أصلاً
+        if (android.system.OsConstants.S_ISLNK(mode)) {
+            // رابط رمزي (حتى المكسور الذي يكذب عليه exists()) — احذف الرابط لا هدفه
+            return try { android.system.Os.unlink(file.absolutePath); true }
+            catch (e: Exception) { false }
+        }
         if (file.isDirectory) {
             file.listFiles()?.forEach { deleteRecursively(it) }
         }
         return file.delete()
     }
+
+    private fun fileMode(f: File): Int = try {
+        android.system.Os.lstat(f.absolutePath).st_mode
+    } catch (e: Exception) { 0 }
 
     /** حجم مجلد تكراري بالبايت */
     fun dirSize(dir: File): Long {

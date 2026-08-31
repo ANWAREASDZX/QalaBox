@@ -58,12 +58,16 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
     private var containerId: String? = null
     private var gameTitle: String = "قلعة بوكس"
 
+    // تُكتب من خيط IO وتُقرأ من الرئيسي — الرؤية الفورية ضرورية (v1.3)
+    @Volatile
     private var xserverProcs: List<java.lang.Process> = emptyList()
     private var audio: AudioStreamClient? = null
+    @Volatile
     private var sessionStarted = false
     private var surfaceReady = false
     private var xbridgeAttached = false
     private var gotFirstFrame = false
+    private var cleanedUp = false
     private val ui = Handler(Looper.getMainLooper())
 
     private var scrollAccum = 0f
@@ -391,6 +395,10 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
     }
 
     private fun cleanup() {
+        // v1.3: حارس تكرار — onDestroy قد يستدعيها مرة أخرى بعد confirmExit
+        if (cleanedUp) return
+        cleanedUp = true
+        sessionStarted = false
         audio?.stop()
         audio = null
         if (xbridgeAttached) {
@@ -398,10 +406,16 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
             xbridgeAttached = false
         }
         Launcher.killSession()
-        for (p in xserverProcs) {
-            try { p.destroy() } catch (_: Exception) {}
-        }
+        val procs = xserverProcs
         xserverProcs = emptyList()
+        for (p in procs) {
+            try {
+                p.destroy()
+                if (!p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                    p.destroyForcibly()
+                }
+            } catch (_: Exception) {}
+        }
         stopService(Intent(this, EmulatorService::class.java))
         finish()
     }
@@ -410,9 +424,7 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
         ui.removeCallbacksAndMessages(null)
         // حماية من تسريب الجلسة: لو خرج المستخدم بسحب التطبيق من قائمة المهام
         // يجب إنهاء proot + الخدمة + الخادم — غير نُظّفت في confirmExit
-        if (sessionStarted || xbridgeAttached || xserverProcs.isNotEmpty()) {
-            cleanup()
-        }
+        cleanup()
         super.onDestroy()
     }
 }

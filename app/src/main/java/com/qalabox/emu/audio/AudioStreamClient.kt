@@ -13,6 +13,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * علاج تقطيع الصوت الشهير في ExaGear: تخزين مؤقت أكبر قابل للضبط
  * + إعادة اتصال تلقائية + تشغيل على خيط منفصل منخفض التأخير.
+ *
+ * v1.3: AudioTrack يُحتفظ به في مستوى الصف — stop() يوقف التشغيل فوراً
+ * فيُفكّ أي حجب write قائم (كان الخيط قد يظل عالقاً ماسكاً المسار)؛
+ * وكتابة كل مقطع تُفحص ضد النتيجة لتجاهل المقاطع المقطوعة.
  */
 class AudioStreamClient(
     private val host: String = "127.0.0.1",
@@ -25,6 +29,8 @@ class AudioStreamClient(
     private var thread: Thread? = null
     @Volatile
     private var currentSocket: Socket? = null
+    @Volatile
+    private var track: AudioTrack? = null
 
     fun start() {
         if (running.get()) return
@@ -37,6 +43,9 @@ class AudioStreamClient(
 
     fun stop() {
         running.set(false)
+        // إيقاف المسار أولاً — يفكّ حجب write() حتى لو كان الخيط داخل الكتابة
+        try { track?.pause() } catch (_: Exception) {}
+        try { track?.flush() } catch (_: Exception) {}
         // إغلاق المقبس يفك حجب read() — Thread.interrupt وحده لا يكفي
         try { currentSocket?.close() } catch (_: Exception) {}
         currentSocket = null
@@ -51,7 +60,7 @@ class AudioStreamClient(
             AudioFormat.ENCODING_PCM_16BIT
         ).coerceAtLeast(4096)
 
-        val track = AudioTrack.Builder()
+        val tr = AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_GAME)
@@ -68,6 +77,7 @@ class AudioStreamClient(
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setBufferSizeInBytes(maxOf(minBuf, bufferSizeBytes * 2))
             .build()
+        track = tr
 
         val chunk = ByteArray(bufferSizeBytes)
         while (running.get()) {
@@ -77,7 +87,7 @@ class AudioStreamClient(
                     sock.tcpNoDelay = true
                     val ins = sock.getInputStream()
                     LogStore.append("Audio", "متصل بخادم الصوت $host:$port")
-                    track.play()
+                    if (tr.playState != AudioTrack.PLAYSTATE_PLAYING) tr.play()
                     while (running.get()) {
                         var read = 0
                         while (read < chunk.size) {
@@ -85,21 +95,23 @@ class AudioStreamClient(
                             if (n < 0) throw java.io.IOException("نهاية التدفق")
                             read += n
                         }
-                        track.write(chunk, 0, read)
+                        // النتيجة مهمة: المقطع المقطوع/المرفوض لا يُعاد عدّه نجاحاً
+                        val written = tr.write(chunk, 0, read)
+                        if (written < 0) throw java.io.IOException("فشل كتابة الصوت: $written")
                     }
                 }
             } catch (e: Exception) {
                 if (running.get()) {
                     LogStore.append("Audio", "انقطع الاتصال — إعادة المحاولة… (${e.message})")
-                    track.pause()
-                    track.flush()
+                    try { tr.pause(); tr.flush() } catch (_: Exception) {}
                     try { Thread.sleep(1000) } catch (_: InterruptedException) {}
                 }
             }
         }
         try {
-            track.stop()
-            track.release()
+            tr.stop()
+            tr.release()
         } catch (_: Exception) {}
+        track = null
     }
 }

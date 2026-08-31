@@ -10,11 +10,16 @@ export DISPLAY="${DISPLAY:-:0}"
 log() { echo "[startup] $*"; }
 
 # ── 0) انتظار خادم العرض (كفالة: wine لن يبدأ قبل أن يكون :0 حياً) ──
+X_READY=0
 for i in $(seq 1 50); do
-    if [ -e "/tmp/.X11-unix/X0" ]; then break; fi
+    if [ -e "/tmp/.X11-unix/X0" ]; then X_READY=1; break; fi
     sleep 0.1
 done
-log "العرض :0 جاهز"
+if [ "$X_READY" = "1" ]; then
+    log "العرض :0 جاهز"
+else
+    log "تحذير: انتهت مهلة انتظار مقبس العرض :0 — قد يفشل الإقلاع الرسومي"
+fi
 
 # ── 1) الصوت: PulseAudio + بروتوكول Simple-TCP على المنفذ 4712 ──
 # (علاج تقطيع الصوت: تدفق PCM خام يستقبله التطبيق ويضبط سماكته)

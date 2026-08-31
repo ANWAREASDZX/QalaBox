@@ -231,6 +231,8 @@ class SettingsFragment : Fragment() {
 
     /* ───────── تثبيت وقت التشغيل ───────── */
     private fun installRuntime(uri: Uri) {
+        // حماية: رد المُنتقي قد يصل بعد انفصال الشظية (خروج سريع) — v1.3
+        if (!isAdded) return
         val ctx = requireContext()
         val progress = androidx.appcompat.app.AlertDialog.Builder(ctx)
             .setTitle(R.string.runtime_pkg_title)
@@ -246,6 +248,7 @@ class SettingsFragment : Fragment() {
                 }
             }
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (!isAdded) return@withContext // الشظية انفصلت أثناء التثبيت — v1.3
                 progress.dismiss()
                 r.fold(onSuccess = { _ ->
                     versionLabel?.let { refreshRuntimeStatus(it) }

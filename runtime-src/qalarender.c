@@ -17,6 +17,10 @@
  *   - كل قراءة/كتابة لـ g_client تحت قفل (منع تسابق البيانات)
  *   - حلقة القبول تتنفس عند الخطأ بدل الدوران الحارق للمعالج
  *   - معالجة SIGTERM/SIGINT لخروج نظيف
+ * v1.3 أداء:
+ *   - مخزن حزم دائم مُعاد استخدامه — كان malloc/free لحوالي 8MB لكل إطار
+ *     (تضييع وقت ومساحات ذاكرة عالية الضغط كل 16ms)
+ *   - إيقاع إطارات بموعد مطلق مع تصحيح الانجراف بدل usleep بعد العمل
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -62,6 +66,20 @@ static int g_listen = -1;
 static volatile sig_atomic_t g_running = 1;
 static int g_fps = 60;
 static pthread_mutex_t g_clientMutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* v1.3: مخزن حزم دائم — يُنمّى عند الحاجة ويُعاد استخدامه كل إطار */
+static uint8_t *g_pkt = NULL;
+static size_t   g_pktCap = 0;
+
+/* تأمين حجم المخزن الدائم — يعيد مؤشراً صالحاً أو NULL */
+static uint8_t *ensurePktBuf(size_t total) {
+    if (total <= g_pktCap) return g_pkt;
+    uint8_t *nb = (uint8_t *) realloc(g_pkt, total);
+    if (!nb) return NULL;
+    g_pkt = nb;
+    g_pktCap = total;
+    return g_pkt;
+}
 
 /* قراءة واصف العميل الحالي بأمان */
 static int getClientFd(void) {
@@ -133,7 +151,8 @@ static void sendFrame(uint32_t idx) {
     hdr.magic = MAGIC_FRAME;
     hdr.payloadSize = (uint32_t) (12 + dataLen);
 
-    uint8_t *packet = (uint8_t *) malloc(sizeof(hdr) + hdr.payloadSize);
+    size_t total = sizeof(hdr) + hdr.payloadSize;
+    uint8_t *packet = ensurePktBuf(total);
     if (!packet) { XDestroyImage(img); return; }
 
     uint32_t meta[3] = { (uint32_t) g_scrW, (uint32_t) g_scrH, idx };
@@ -156,11 +175,10 @@ static void sendFrame(uint32_t idx) {
     XDestroyImage(img);
 
     pthread_mutex_lock(&g_clientMutex);
-    if (g_client >= 0 && writeFull(g_client, packet, sizeof(hdr) + hdr.payloadSize) < 0) {
+    if (g_client >= 0 && writeFull(g_client, packet, total) < 0) {
         closeClientLocked();
     }
     pthread_mutex_unlock(&g_clientMutex);
-    free(packet);
 }
 
 static void sendCursor(void) {
@@ -175,7 +193,8 @@ static void sendCursor(void) {
     hdr.magic = MAGIC_CURSOR;
     hdr.payloadSize = (uint32_t) payload;
 
-    uint8_t *packet = (uint8_t *) malloc(sizeof(hdr) + payload);
+    size_t total = sizeof(hdr) + payload;
+    uint8_t *packet = ensurePktBuf(total);
     if (!packet) { XFree(ci); return; }
 
     int32_t info[4] = { ci->x, ci->y, (int32_t) ci->xhot, (int32_t) ci->yhot };
@@ -192,11 +211,10 @@ static void sendCursor(void) {
     memcpy(packet + sizeof(hdr) + 16, dims, 8);
 
     pthread_mutex_lock(&g_clientMutex);
-    if (g_client >= 0 && writeFull(g_client, packet, sizeof(hdr) + payload) < 0) {
+    if (g_client >= 0 && writeFull(g_client, packet, total) < 0) {
         closeClientLocked();
     }
     pthread_mutex_unlock(&g_clientMutex);
-    free(packet);
     XFree(ci);
 }
 
@@ -204,14 +222,33 @@ static void *captureLoop(void *arg) {
     (void) arg;
     uint32_t idx = 0;
     long usec = 1000000 / (g_fps > 0 ? g_fps : 60);
+    /* v1.3: موعد الإطار القادم مطلق مع تصحيح الانجراف — العمل (XGetImage
+     * + كتابة المقبس) كان يُضاف فوق فترة السكون فيرفع الفعلي كثيراً تحت 60 */
+    struct timespec next;
+    clock_gettime(CLOCK_MONOTONIC, &next);
     while (g_running) {
-        if (getClientFd() < 0) { usleep(100000); continue; }
+        if (getClientFd() < 0) { usleep(100000); clock_gettime(CLOCK_MONOTONIC, &next); continue; }
         /* إعادة فحص الدقة دورياً (لتتبع تغيير الدقة الافتراضية في Wine) */
         if (idx % 30 == 0) queryRootSize();
         sendFrame(idx);
         if (idx % 5 == 0) sendCursor();
         idx++;
-        usleep(usec);
+
+        next.tv_nsec += usec * 1000;
+        while (next.tv_nsec >= 1000000000L) {
+            next.tv_sec++;
+            next.tv_nsec -= 1000000000L;
+        }
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long lateNs = (next.tv_sec - now.tv_sec) * 1000000000L +
+                      (next.tv_nsec - now.tv_nsec);
+        if (lateNs > 0) {
+            usleep((useconds_t) (lateNs / 1000));
+        } else {
+            /* تأخرنا عن الموعد — أعد الضبط لتفادي تكدّس المحاولات */
+            next = now;
+        }
     }
     return NULL;
 }
