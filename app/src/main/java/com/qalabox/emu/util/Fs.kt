@@ -278,9 +278,9 @@ object Fs {
         val mode = fileMode(file)
         if (mode == 0) return true                    // غير موجود أصلاً
         if (android.system.OsConstants.S_ISLNK(mode)) {
-            // رابط رمزي (حتى المكسور الذي يكذب عليه exists()) — احذف الرابط لا هدفه
-            return try { android.system.Os.unlink(file.absolutePath); true }
-            catch (e: Exception) { false }
+            // رابط رمزي (حتى المكسور الذي يكذب عليه exists()) —
+            // File.delete() تنفّذ unlink على الرابط نفسه ولا تمسّ هدفه
+            return file.delete()
         }
         if (file.isDirectory) {
             file.listFiles()?.forEach { deleteRecursively(it) }
