@@ -157,4 +157,19 @@
     <string name="license_cncddraw">cnc-ddraw — GPL</string>
     <string name="license_proot">PRoot — GPL 2.0</string>
     <string name="legal_text">قلعة بوكس لا تتضمن أي ألعاب أو ملفات محمية بحقوق الملكية. يجب أن تملك نسخة أصلية من كل لعبة. لا توزع تطبيقك مع ملفات ExaGear الأصلية فهي ملكية خاصة وغير مرخصة.</string>
+
+    <!-- ═══════════════ v1.4: فحص البيئة وتشخيص العرض ═══════════════ -->
+    <string name="runtime_check">فحص البيئة</string>
+    <string name="runtime_checking">جارٍ فحص مكونات وقت التشغيل داخل الجذر…</string>
+    <string name="runtime_check_ok">كل المكونات موجودة ✓ — إن استمرت مشكلة العرض فالسبب في سجل الجلسة</string>
+    <string name="runtime_check_missing">مكونات ناقصة: %1$d — المفقود هو سبب العلوق مباشرة. أعد تثبيت حزمة .qbxruntime كاملة</string>
+    <string name="emu_session_ended">انتهت جلسة اللعبة بكود %1$d. راجع السجل لمعرفة السبب الدقيق</string>
+    <string name="emu_diag_title">التشخيص: لم يصل أي إطار</string>
+    <string name="emu_diag_intro">مرّت 45 ثانية دون إطار واحد من خادم العرض. نتائج الفحص الفوري:</string>
+    <string name="emu_diag_xserver">خادم العرض (مقبس X0): %1$s</string>
+    <string name="emu_diag_bridge">جسر العرض (مقبس الجسر): %1$s</string>
+    <string name="emu_diag_procs">عمليات العرض حية: %1$s</string>
+    <string name="emu_diag_hint">المقبس ✗ مع عمليات ✗ يعني غالباً مكوّناً ناقصاً في حزمة وقت التشغيل (Xvfb أو qalarender) — استخدم زر «فحص البيئة» من الإعدادات للكشف عن المكوّن المفقود بالضبط.</string>
+    <string name="emu_diag_retry">إعادة محاولة الربط</string>
+    <string name="emu_diag_logs">عرض السجل</string>
 </resources>

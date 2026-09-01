@@ -22,6 +22,13 @@
  * v1.3 أداء:
  *   - جدول أعمدة LUT للتحجيم (إلغاء قسمة 64-بت لكل بكسل — تسريع 3-5x)
  *   - مسح الحواف بـ memset بدل بكسل-بكسل
+ * v1.4 إصلاح عرض حرج:
+ *   - إجبار alpha=0xFF لكل بكسل — خوادم X بدقة 24-بت (Xvfb!) تعيد بايت
+ *     الحشو = 0، وكان يُنسخ للسطح فيصبح الإطار شفافاً بالكامل فوق الخلفية
+ *     السوداء = «اللعبة لا تظهر أبداً» رغم تدفق الإطارات فعلياً!
+ *   - فرض صيغة السطح RGBA_8888 عند الربط (حماية من صيغ غير 4-بايت)
+ *   - حارس LUT: فشل التوسيع لا يقرأ خارج الحدود — يرجع للقسمة المباشرة
+ *   - نافذة إعادة اتصال أطول (60 ثانية) — أجهزة بطيئة تشغل Xvfb متأخراً
  */
 #include <jni.h>
 #include <android/log.h>
@@ -186,11 +193,17 @@ static int   g_colLutW = 0;        /* العدد المخصص حالياً */
 static int   g_colLutRectW = -1;
 static int   g_colLutSrcW = -1;
 
-static void ensureColLut(int rectW, int srcW) {
-    if (rectW == g_colLutRectW && srcW == g_colLutSrcW && g_colLut) return;
+/* يعيد 1 عند توفر LUT صالح، 0 عند الفشل (فليحسب المتصل مباشرة) */
+static int ensureColLut(int rectW, int srcW) {
+    if (rectW == g_colLutRectW && srcW == g_colLutSrcW && g_colLut) return 1;
     if (rectW > g_colLutW) {
         int *nb = (int *) realloc(g_colLut, (size_t) rectW * sizeof(int));
-        if (!nb) return; /* حافظ على القديم — سيُعاد المحاولة الإطار القادم */
+        if (!nb) {
+            /* v1.4: فشل التوسيع — القديم أصغر من المطلوب؛ أي استخدام له الآن
+               قراءة خارج الحدود. علّم الحالة كفاشلة بدلاً من ذلك */
+            g_colLutRectW = -1;
+            return 0;
+        }
         g_colLut = nb;
         g_colLutW = rectW;
     }
@@ -201,6 +214,13 @@ static void ensureColLut(int rectW, int srcW) {
     }
     g_colLutRectW = rectW;
     g_colLutSrcW = srcW;
+    return 1;
+}
+
+/* v1.4: ملء صف بأسود معتم (alpha=0xFF) — memset يصفّر alpha فيشفف الصف */
+static void fillRowOpaque(uint8_t *row, int pixels) {
+    uint32_t *p = (uint32_t *) row;
+    for (int x = 0; x < pixels; x++) p[x] = 0xFF000000u; /* R,G,B=0 A=255 */
 }
 
 static void blitFrame(const uint8_t *src, int w, int h) {
@@ -235,15 +255,14 @@ static void blitFrame(const uint8_t *src, int w, int h) {
     if (rectW > dstW) rectW = dstW;
     if (rectH > dstH) rectH = dstH;
 
-    ensureColLut(rectW, w);
-    if (!g_colLut) { ANativeWindow_unlockAndPost(g_window); return; }
+    int useLut = ensureColLut(rectW, w);
 
     for (int y = 0; y < dstH; y++) {
         uint8_t *drow = (uint8_t *) buf.bits + (size_t) y * buf.stride * 4;
         int insideY = (y >= offY && y < offY + rectH);
         if (!insideY) {
-            /* صف خارج المستطيل — أسود شفاف كاملاً بمسح واحد */
-            memset(drow, 0, (size_t) dstW * 4);
+            /* صف خارج المستطيل — أسود معتم (alpha=255 إجباري) */
+            fillRowOpaque(drow, dstW);
             continue;
         }
         int sy = (int) (((long long) (y - offY) * h) / rectH);
@@ -251,21 +270,35 @@ static void blitFrame(const uint8_t *src, int w, int h) {
         const uint8_t *srow = (sy >= 0 && sy < h) ? src + (size_t) sy * w * 4 : NULL;
 
         /* الحواف اليسرى/اليمنى خارج المستطيل */
-        if (offX > 0) memset(drow, 0, (size_t) offX * 4);
-        if (offX + rectW < dstW) memset(drow + (size_t)(offX + rectW) * 4, 0,
-                                        (size_t)(dstW - offX - rectW) * 4);
+        if (offX > 0) fillRowOpaque(drow, offX);
+        if (offX + rectW < dstW) fillRowOpaque(drow + (size_t)(offX + rectW) * 4,
+                                               dstW - offX - rectW);
         if (!srow) continue;
 
-        const int *lut = g_colLut;
         uint8_t *d = drow + (size_t) offX * 4;
-        for (int x = 0; x < rectW; x++) {
-            const uint8_t *s = srow + (size_t) lut[x] * 4;
-            /* BGRA → RGBA */
-            d[0] = s[2];
-            d[1] = s[1];
-            d[2] = s[0];
-            d[3] = s[3];
-            d += 4;
+        if (useLut) {
+            const int *lut = g_colLut;
+            for (int x = 0; x < rectW; x++) {
+                const uint8_t *s = srow + (size_t) lut[x] * 4;
+                /* BGRA → RGBA مع alpha معتم إجباري (v1.4) */
+                d[0] = s[2];
+                d[1] = s[1];
+                d[2] = s[0];
+                d[3] = 0xFF;
+                d += 4;
+            }
+        } else {
+            /* بلا LUT (فشل تخصيص) — قسمة مباشرة، صحيح إن كان أبطأ */
+            for (int x = 0; x < rectW; x++) {
+                int sx = (int) (((long long) x * w) / rectW);
+                if (sx >= w) sx = w - 1;
+                const uint8_t *s = srow + (size_t) sx * 4;
+                d[0] = s[2];
+                d[1] = s[1];
+                d[2] = s[0];
+                d[3] = 0xFF;
+                d += 4;
+            }
         }
     }
     ANativeWindow_unlockAndPost(g_window);
@@ -277,10 +310,13 @@ static void *rxLoop(void *arg) {
     JNIEnv *env = attachJvm();
     if (env == NULL) return NULL;
 
-    /* اتصال مع إعادة محاولة (خادم العرض قد يتأخر في الإقلاع) */
-    for (int i = 0; i < 40 && g_running; i++) {
+    /* اتصال مع إعادة محاولة — 120×500ms = 60 ثانية:
+       إقلاع Xvfb داخل proot على أجهزة بطيئة قد يتجاوز 20 ثانية،
+       وكانت نافذة الـ 20 ثانية تفشل قبل جاهزية الجسر نهائياً */
+    for (int i = 0; i < 120 && g_running; i++) {
         int fd = connectUnix(g_socketPath);
         if (fd >= 0) {
+            if (i > 0) LOGI("تم الاتصال بعد %d محاولة", i + 1);
             pthread_mutex_lock(&g_writeMutex);
             g_sock = fd;
             pthread_mutex_unlock(&g_writeMutex);
@@ -422,6 +458,12 @@ Java_com_qalabox_emu_EmulatorActivity_nativeAttach(JNIEnv *env, jobject thiz,
 
     g_window = ANativeWindow_fromSurface(env, surface);
     if (!g_window) return JNI_FALSE;
+
+    /* v1.4: فرض صيغة RGBA_8888 (0,0 = احتفظ بالأبعاد الحالية).
+       blitFrame يكتب 4 بايتات/بكسل — أي صيغة أخرى ستُظهر تشوهاً تاماً */
+    if (ANativeWindow_setBuffersGeometry(g_window, 0, 0, WINDOW_FORMAT_RGBA_8888) != 0) {
+        LOGE("تعذر فرض صيغة RGBA_8888 على السطح");
+    }
 
     g_maxFps = maxFps > 0 ? maxFps : 60;
     g_thiz = (*env)->NewGlobalRef(env, thiz);

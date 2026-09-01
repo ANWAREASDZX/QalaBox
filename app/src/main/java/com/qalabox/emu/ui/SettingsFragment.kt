@@ -139,6 +139,7 @@ class SettingsFragment : Fragment() {
             Toast.makeText(ctx, R.string.runtime_pick_hint, Toast.LENGTH_LONG).show()
             runtimePicker.launch(arrayOf("*/*", "application/octet-stream"))
         })
+        container.addView(button(getString(R.string.runtime_check)) { runEnvironmentCheck() })
         container.addView(button(getString(R.string.logs_export)) {
             val i = LogStore.exportIntent(ctx)
             if (i != null) startActivity(Intent.createChooser(i, getString(R.string.logs_export)))
@@ -227,6 +228,33 @@ class SettingsFragment : Fragment() {
             .setMessage(R.string.legal_text)
             .setPositiveButton(R.string.ok, null)
             .show()
+    }
+
+    /** v1.4: فحص ذاتي لمكونات وقت التشغيل داخل الجذر — يكشف بالضبط أي
+     *  مكوّن ناقص (Xvfb/qalarender/wine/box86/…) بدل أعطال صامتة عند الإطلاق */
+    private fun runEnvironmentCheck() {
+        if (!isAdded) return
+        val ctx = requireContext()
+        val progress = androidx.appcompat.app.AlertDialog.Builder(ctx)
+            .setTitle(R.string.runtime_check)
+            .setMessage(R.string.runtime_checking)
+            .setCancelable(false).create()
+        progress.show()
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val lines = RuntimeManager.environmentCheck(ctx)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (!isAdded) return@withContext
+                progress.dismiss()
+                val missing = lines.count { it.startsWith("MISSING") }
+                val summary = if (missing == 0) getString(R.string.runtime_check_ok)
+                              else getString(R.string.runtime_check_missing, missing)
+                MaterialAlertDialogBuilder(ctx)
+                    .setTitle(R.string.runtime_check)
+                    .setMessage(summary + "\n\n" + lines.joinToString("\n"))
+                    .setPositiveButton(R.string.ok, null)
+                    .show()
+            }
+        }
     }
 
     /* ───────── تثبيت وقت التشغيل ───────── */

@@ -1,6 +1,8 @@
 #!/bin/bash
 # startup.sh — إقلاع اللعبة داخل نظام الجذر (يستدعيه Launcher.launchGame)
 # v1.1: انتظار جاهزية العرض + اختيار wine64 للألعاب 64-بت + تنظيف متغيرات
+# v1.4: فحوص إقلاع صريحة (wine/الملف التنفيذي) + سطح مكتب Wine افتراضي
+#       (QB_DESKTOP) + سجلات تشخيص غابت عن ExaGear كلياً — كل فشل يترك أثراً
 set -u
 export WINEPREFIX="${QB_WINEPREFIX:-/container/prefix}"
 export WINEDEBUG="${WINEDEBUG:--all}"
@@ -8,6 +10,7 @@ export DISPLAY="${DISPLAY:-:0}"
 # WINEDLLOVERRIDES يصل مباشرة عبر بيئة الجلسة (يضبطه DxWrapperManager)
 
 log() { echo "[startup] $*"; }
+err() { echo "[startup][خطأ] $*"; }
 
 # ── 0) انتظار خادم العرض (كفالة: wine لن يبدأ قبل أن يكون :0 حياً) ──
 X_READY=0
@@ -18,7 +21,7 @@ done
 if [ "$X_READY" = "1" ]; then
     log "العرض :0 جاهز"
 else
-    log "تحذير: انتهت مهلة انتظار مقبس العرض :0 — قد يفشل الإقلاع الرسومي"
+    err "انتهت مهلة انتظار مقبس العرض :0 — حزمة العرض لم تنجح، الإطارات لن تصل أبداً"
 fi
 
 # ── 1) الصوت: PulseAudio + بروتوكول Simple-TCP على المنفذ 4712 ──
@@ -49,5 +52,32 @@ WINE_BIN="wine"
 if [ "${QB_ARCH:-x86}" = "x64" ] && command -v wine64 >/dev/null 2>&1; then
     WINE_BIN="wine64"
 fi
-log "تشغيل: ${WINE_BIN} \"${QB_EXE_WIN:-}\" ${QB_ARGS:-}"
-exec "${WINE_BIN}" "${QB_EXE_WIN}" ${QB_ARGS:-}
+
+# ── 4-ب) فحوص إقلاع صريحة — كانت الإخفاقات تمر بصمت (v1.4) ──
+if ! command -v "$WINE_BIN" >/dev/null 2>&1; then
+    err "الثنائي «$WINE_BIN» غير موجود في نظام الجذر! حزمة وقت التشغيل ناقصة أو معطوبة"
+    err "المطلوب: wine (وbox86/box64) داخل الجذر — راجع docs/RUNTIME_BINARIES.md"
+    exit 127
+fi
+EXE_NAME="${QB_EXE_WIN##*\\}"
+GAME_FILE="/container/prefix/drive_c/${QB_EXE_REL_DIR:-}/${EXE_NAME}"
+if [ -n "${QB_EXE_WIN:-}" ] && [ ! -f "$GAME_FILE" ]; then
+    err "ملف اللعبة غير موجود: $GAME_FILE"
+    err "تحقق من وضع ملفات اللعبة داخل مجلد الحاوية (drive_c) ومن اسم الملف التنفيذي"
+    exit 2
+fi
+log "المعمارية=${QB_ARCH:-x86} | WINEARCH=${WINEARCH:-win32} | الواجهة=$WINE_BIN"
+log "تشغيل: ${QB_EXE_WIN:-} ${QB_ARGS:-}"
+
+# ── 5) سطح مكتب Wine افتراضي (v1.4) ──
+# مستوى ثابت من الاستقرار للألعاب الكلاسيكية: يمنع فشل تغيير الدقة/الوضع
+# الحصري على Xvfb (سبب شاشة سوداء/خروج صامت)، وبنفس نمط ExaGear.
+# يُعطَّل لكل بروفايل عبر env: QB_DESKTOP=0
+if [ "${QB_DESKTOP:-1}" = "1" ]; then
+    DW="${QB_SCREEN_W:-1280}"
+    DH="${QB_SCREEN_H:-720}"
+    log "سطح مكتب افتراضي ${DW}x${DH} (QB_DESKTOP=1 — أوقفه من بروفايل اللعبة عند الحاجة)"
+    exec "$WINE_BIN" explorer "/desktop=QalaBox,${DW}x${DH}" "${QB_EXE_WIN}" ${QB_ARGS:-}
+fi
+
+exec "$WINE_BIN" "${QB_EXE_WIN}" ${QB_ARGS:-}

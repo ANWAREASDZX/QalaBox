@@ -117,6 +117,12 @@ object ProfileEngine {
         env["QB_WINEPREFIX"] = "/container/prefix"
         // المعمارية المكتشفة توجّه اختيار wine/wine64 داخل startup.sh
         env["QB_ARCH"] = arch
+        // v1.4: أبعاد سطح مكتب Wine الافتراضي (startup.sh يبنيه تلقائياً) —
+        // يمنع فشل تغيير الدقة على Xvfb (سبب شائع لعدم ظهور اللعبة).
+        // البروفايل يمكنه تعطيله بـ "QB_DESKTOP": "0" في env
+        if (!profile.env.containsKey("QB_DESKTOP")) env["QB_DESKTOP"] = "1"
+        env["QB_SCREEN_W"] = container.screenWidth.coerceAtLeast(320).toString()
+        env["QB_SCREEN_H"] = container.screenHeight.coerceAtLeast(240).toString()
         // نمط الأداء الخاص باللعبة (من الضغط المطوّل) يتجاوز الإعداد العام —
         // بيئة الجلسة تُطبّق في launchGame بعد بيئة الإعدادات العامة
         if (profile.preset != "balanced") {

@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -66,7 +67,9 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
     private var sessionStarted = false
     private var surfaceReady = false
     private var xbridgeAttached = false
+    @Volatile
     private var gotFirstFrame = false
+    @Volatile
     private var cleanedUp = false
     private val ui = Handler(Looper.getMainLooper())
 
@@ -141,6 +144,9 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
         touchpad.tapDelayMs = settings.tapDelayMs
         OnScreenControls.build(oskContainer, settings) { name, down -> onOskButton(name, down) }
         setupTopBar()
+
+        // v1.4: فرض صيغة 4-بايتات للسطح — blitFrame يكتب RGBA 32-بت دائماً
+        surfaceView.holder.setFormat(PixelFormat.RGBA_8888)
 
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -245,12 +251,82 @@ class EmulatorActivity : AppCompatActivity(), TouchpadView.Callback {
                 }
                 return@launch
             }
+            watchSessionExit(result.getOrNull()!!)
 
             // 3) الصوت
             audio = AudioStreamClient(bufferSizeBytes = settings.audioBufferBytes).also { it.start() }
             sessionStarted = true
-            withContext(Dispatchers.Main) { attachXbridge() }
+            withContext(Dispatchers.Main) {
+                attachXbridge()
+                armFirstFrameWatchdog()
+            }
         }
+    }
+
+    /** v1.4: مراقب انتهاء الجلسة المبكر — كان فشل wine (ملف ناقص/معمارية
+     *  خاطئة/مكوّن مفقود) يمرّ صامتاً فتبقى الشاشة معلقة إلى الأبد بلا أي
+     *  رسالة. الآن كل خروج مبكر يترك أثراً واضحاً في السجل والواجهة */
+    private fun watchSessionExit(p: java.lang.Process) {
+        Thread {
+            val code = try { p.waitFor() } catch (_: InterruptedException) { return@Thread }
+            if (cleanedUp) return@Thread
+            LogStore.append("Launch", "انتهت جلسة اللعبة بكود $code" +
+                    if (code != 0) " (فشل! راجع سجل wine أعلاه)" else "")
+            ui.post {
+                if (cleanedUp || isFinishing) return@post
+                Toast.makeText(this,
+                    getString(R.string.emu_session_ended, code), Toast.LENGTH_LONG).show()
+                bootLabel.visibility = View.GONE
+            }
+        }.start()
+    }
+
+    /**
+     * v1.4: قِ-دوg أول إطار — بعد 45 ثانية من بدء الجلسة وإن لم يصل إطار واحد
+     * نعرض تشخيصاً فورياً قابلاً للتنفيذ بدل شاشة معلقة صامتة: حالة مقبس X،
+     * حالة جسر العرض، حالة العمليات، واختصار السجل + إعادة محاولة الربط.
+     */
+    private fun armFirstFrameWatchdog() {
+        ui.removeCallbacks(firstFrameWatchdog)
+        ui.postDelayed(firstFrameWatchdog, 45_000L)
+    }
+
+    private val firstFrameWatchdog = Runnable {
+        if (gotFirstFrame || cleanedUp || isFinishing || !sessionStarted) return@Runnable
+        LogStore.append("Watchdog", "لم يصل أي إطار بعد 45 ثانية — عرض التشخيص")
+        showNoFrameDiagnostics()
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun showNoFrameDiagnostics() {
+        if (isFinishing || cleanedUp) return
+        val sd = RuntimeManager.sockDir(this)
+        val xOk = java.io.File(sd, "X0").exists()
+        val bridgeOk = java.io.File(sd, ".xbridge.sock").exists()
+        val procsAlive = xserverProcs.any { it.isAlive }
+        val msg = buildString {
+            append(getString(R.string.emu_diag_intro))
+            append("\n\n")
+            append("• " + getString(R.string.emu_diag_xserver, if (xOk) "✓" else "✗"))
+            append("\n• " + getString(R.string.emu_diag_bridge, if (bridgeOk) "✓" else "✗"))
+            append("\n• " + getString(R.string.emu_diag_procs, if (procsAlive) "✓" else "✗"))
+            append("\n\n")
+            append(getString(R.string.emu_diag_hint))
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.emu_diag_title)
+            .setMessage(msg)
+            .setPositiveButton(R.string.emu_diag_retry) { _, _ ->
+                if (xbridgeAttached) { nativeDetach(); xbridgeAttached = false }
+                attachXbridge()
+                armFirstFrameWatchdog()
+            }
+            .setNeutralButton(R.string.emu_diag_logs) { _, _ ->
+                logPanel.visibility = View.VISIBLE
+                logText.text = LogStore.tail(150)
+            }
+            .setNegativeButton(R.string.close, null)
+            .show()
     }
 
     // ═══════════════════ اللمس → الإدخال ═══════════════════

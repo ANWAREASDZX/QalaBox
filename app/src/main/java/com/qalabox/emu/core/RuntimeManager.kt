@@ -401,14 +401,22 @@ object RuntimeManager {
      *    ثم qalarender داخل الجذر عبر proot لالتقاط الإطارات (يتخطى Xvfb تلقائياً)
      * 2) الحزمة الافتراضية داخل الجذر: Xvfb + qalarender عبر proot
      *
+     * v1.4: فشل صريح وسريع — كان استمرار الإقلاع بعد مهلة المقبس يطلق wine
+     * داخل عرض ميت فتبقى شاشة «جارٍ التشغيل» معلقة بلا أي رسالة. الآن:
+     *   — لا نجاح إلا بعد ظهور مقبس X0 فعلاً
+     *   — لا نجاح إلا بعد ظهور مقبس الجسر .xbridge.sock فعلاً (20 ثانية)
+     *
      * يعيد كل العمليات المُشغّلة (لإيقافها كلها عند التنظيف) — فارغة عند الفشل.
-     * لا يُعاد الاستدعاء حتى يظهر مقبس X0 فعلاً (أو انتهت المهلة).
      */
     fun startXServer(context: Context, width: Int, height: Int): List<Process> {
         val sd = sockDir(context)
         val xs = xserverBin(context)
         val procs = mutableListOf<Process>()
         try {
+            ensureBindDirs(context)
+            // نظّف مقابس جلسة سابقة عالقة — قبولٌ فاشل لاتصال قديم يشوّش الجسر
+            File(sd, ".xbridge.sock").delete()
+
             if (xs.exists() && xs.canExecute()) {
                 val pb = ProcessBuilder(
                     xs.absolutePath, ":0",
@@ -426,7 +434,11 @@ object RuntimeManager {
                     p.errorStream.bufferedReader().forEachLine { LogStore.append("XServer-err", it) }
                 }.start()
                 LogStore.append("XServer", "خادم X المخصص بدأ (${width}x${height})")
-                waitForXSocket(sd)
+                if (!waitForXSocket(sd)) {
+                    LogStore.append("XServer", "خادم X المخصص لم يُنشئ المقبس — إحباط الجلسة")
+                    procs.forEach { try { it.destroy() } catch (_: Exception) {} }
+                    return emptyList()
+                }
                 // الجسر: qalarender داخل الجذر يلتقط من :0 — سكربت العرض
                 // يتخطى Xvfb تلقائياً لأن المقبس جاهز
                 Launcher.ensureScripts(context)
@@ -445,6 +457,11 @@ object RuntimeManager {
                 Thread {
                     rp.inputStream.bufferedReader().forEachLine { LogStore.append("render", it) }
                 }.start()
+                if (!waitForBridgeSocket(sd)) {
+                    LogStore.append("XServer", "جسر العرض لم يظهر (.xbridge.sock) — راجع سجل render")
+                    procs.forEach { try { it.destroy() } catch (_: Exception) {} }
+                    return emptyList()
+                }
                 LogStore.append("XServer", "جسر qalarender متصل بخادم X المخصص")
                 return procs
             }
@@ -469,13 +486,31 @@ object RuntimeManager {
             Thread {
                 p.inputStream.bufferedReader().forEachLine { LogStore.append("render", it) }
             }.start()
-            waitForXSocket(sd)
+            if (!waitForXSocket(sd)) {
+                LogStore.append("XServer", "Xvfb لم يُنشئ مقبس العرض — راجع سجل render (غالباً مكوّن ناقص في الحزمة)")
+                procs.forEach { try { it.destroy() } catch (_: Exception) {} }
+                return emptyList()
+            }
+            if (!waitForBridgeSocket(sd)) {
+                LogStore.append("XServer", "جسر العرض لم يظهر (.xbridge.sock) — راجع سجل render")
+                procs.forEach { try { it.destroy() } catch (_: Exception) {} }
+                return emptyList()
+            }
             return procs
         } catch (e: Exception) {
             LogStore.append("XServer", "فشل تشغيل خادم العرض: ${e.message}")
             procs.forEach { try { it.destroy() } catch (_: Exception) {} }
             return emptyList()
         }
+    }
+
+    /** v1.4: مجلدات يجب أن تكون ملموسة داخل الجذر قبل أي جلسة proot —
+     *  بعض نسخ proot تتصرف بشكل مختلف مع أهداف ربط غائبة تماماً */
+    private fun ensureBindDirs(context: Context) {
+        try {
+            File(File(rootfsDir(context), "tmp"), ".X11-unix").mkdirs()
+            File(rootfsDir(context), "qalabox").mkdirs()
+        } catch (_: Exception) {}
     }
 
     /**
@@ -492,7 +527,92 @@ object RuntimeManager {
             }
             try { Thread.sleep(200) } catch (_: InterruptedException) { return false }
         }
-        LogStore.append("XServer", "انتهت مهلة انتظار مقبس العرض — نُكمل على أي حال")
+        LogStore.append("XServer", "انتهت مهلة انتظار مقبس العرض — إحباط الجلسة (v1.4)")
         return false
+    }
+
+    /** v1.4: انتظار جاهزية جسر العرض (qalarender يستمع على .xbridge.sock) —
+     *  الإقلاع لا يُعلن نجاحاً قبل أن يكون هناك من يرسم الإطارات فعلاً */
+    fun waitForBridgeSocket(sd: File, timeoutMs: Long = 20000): Boolean {
+        val bsock = File(sd, ".xbridge.sock")
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (bsock.exists()) {
+                LogStore.append("XServer", "جسر العرض جاهز")
+                return true
+            }
+            try { Thread.sleep(250) } catch (_: InterruptedException) { return false }
+        }
+        return false
+    }
+
+    /**
+     * v1.4 — فحص بيئة ذاتي شامل: يتحقق من كل مكون تشغيل داخل الجذر عبر proot
+     * ويكشف بالضبط ما هو ناقص في حزمة وقت التشغيل المثبتة (بدل الاعتماد على
+     * العطلات الصامتة في وقت الإطلاق). يكشف تحديداً: bash، Xvfb، wine،
+     * wineboot، wineserver، box64، box86، qalarender، pulseaudio، pactl،
+     * ودقة proot نفسها.
+     *
+     * يعيد سطراً لكل مكوّن بصيغة: "OK: الاسم — التفاصيل" أو "MISSING: الاسم".
+     */
+    fun environmentCheck(context: Context): List<String> {
+        val out = mutableListOf<String>()
+        if (!probeProotExec(context)) {
+            out.add("MISSING: proot (تعذر التنفيذ على هذا الجهاز)")
+            return out
+        }
+        out.add("OK: proot — قابل للتنفيذ")
+        ensureScriptsInstalled(context)
+        val script = "/qalabox/env_check.sh"
+        val lines = runInRootfsCapture(context, listOf("/bin/bash", script), timeoutSec = 90)
+        if (lines.isEmpty()) {
+            out.add("MISSING: تنفيذ فحص الجذر فشل كلياً (bash غير موجود؟ الجذر تالف؟)")
+            return out
+        }
+        out.addAll(lines)
+        return out
+    }
+
+    /** نسخ سكربت الفحص إلى الجذر (مثل ensureScripts لكن بدون نسخ الكل) */
+    private fun ensureScriptsInstalled(context: Context) {
+        Launcher.ensureScripts(context)
+        try {
+            context.assets.open("scripts/env_check.sh").use { ins ->
+                val f = File(File(rootfsDir(context), "qalabox"), "env_check.sh")
+                f.outputStream().use { ins.copyTo(it) }
+                f.setExecutable(true, false)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /** تنفيذ أمر داخل الجذر وجمع مخرجاته (للفحص الذاتي) — آمن ومحدود مهلة */
+    private fun runInRootfsCapture(
+        context: Context,
+        command: List<String>,
+        timeoutSec: Int = 60
+    ): List<String> {
+        val lines = mutableListOf<String>()
+        return try {
+            Launcher.ensureScripts(context)
+            val cmd = Launcher.buildProotCommand(context, null) + command
+            val env = Launcher.buildBaseEnv(context, null)
+            val pb = ProcessBuilder(cmd)
+            pb.environment().clear()
+            pb.environment().putAll(env)
+            pb.redirectErrorStream(true)
+            val p = pb.start()
+            Thread {
+                p.inputStream.bufferedReader().forEachLine { l ->
+                    synchronized(lines) { if (lines.size < 64) lines.add(l) }
+                }
+            }.start()
+            if (!p.waitFor(timeoutSec.toLong(), java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly()
+            }
+            synchronized(lines) { lines.toList() }
+        } catch (e: Exception) {
+            LogStore.append("EnvCheck", "فشل: ${e.message}")
+            emptyList()
+        }
     }
 }

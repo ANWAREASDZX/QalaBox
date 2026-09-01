@@ -174,6 +174,12 @@ static void sendFrame(uint32_t idx) {
     }
     XDestroyImage(img);
 
+    /* v1.4 حرج: خوادم X بدقة 24-بت (Xvfb الافتراضية) تعيد بايت الحشو = 0.
+       الجانب الآخر يعرض BGRA→RGBA مباشرة — alpha=0 يعني إطاراً شفافاً
+       بالكامل فوق الخلفية السوداء = «اللعبة لا تظهر» رغم سلاسة التدفق.
+       اضبط بايت alpha على 255 دائماً (آخر بايت من كل بكسل). */
+    for (size_t o = sizeof(hdr) + 12 + 3; o < total; o += 4) packet[o] = 0xFF;
+
     pthread_mutex_lock(&g_clientMutex);
     if (g_client >= 0 && writeFull(g_client, packet, total) < 0) {
         closeClientLocked();
@@ -231,6 +237,10 @@ static void *captureLoop(void *arg) {
         /* إعادة فحص الدقة دورياً (لتتبع تغيير الدقة الافتراضية في Wine) */
         if (idx % 30 == 0) queryRootSize();
         sendFrame(idx);
+        if (idx == 0) {
+            fprintf(stdout, "[qalarender] أُرسل الإطار الأول (%dx%d)\n", g_scrW, g_scrH);
+            fflush(stdout);
+        }
         if (idx % 5 == 0) sendCursor();
         idx++;
 
@@ -358,9 +368,17 @@ int main(int argc, char **argv) {
     sigaction(SIGINT, &sa, NULL);
 
     XInitThreads();
-    g_dpy = XOpenDisplay(display);
+    /* v1.4: إعادة محاولة فتح العرض حتى 10 ثوان — قد يُستدعى qalarender
+       بينما Xvfb لا يزال يُنهي تهيئته (المقبس ظهر لكن الخادم لم يقبل بعد) */
+    for (int attempt = 0; attempt < 20; attempt++) {
+        g_dpy = XOpenDisplay(display);
+        if (g_dpy) break;
+        if (attempt == 0)
+            fprintf(stderr, "[qalarender] العرض %s غير جاهز — إعادة محاولة…\n", display);
+        usleep(500000);
+    }
     if (!g_dpy) {
-        fprintf(stderr, "[qalarender] فشل فتح العرض %s\n", display);
+        fprintf(stderr, "[qalarender] فشل فتح العرض %s نهائياً\n", display);
         return 1;
     }
     g_root = DefaultRootWindow(g_dpy);

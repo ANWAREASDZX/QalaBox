@@ -16,8 +16,8 @@ android {
         // targetSdk 28 يبقي التطبيق في نطاق SELinux القديم untrusted_app_27
         // الذي يسمح بالتنفيذ — وهو النمط المعتمد لدى Termux/Winlator/Mobox.
         targetSdk = 28
-        versionCode = 5
-        versionName = "1.3.0"
+        versionCode = 6
+        versionName = "1.4.0"
         ndkVersion = "26.1.10909125"
         ndk {
             // محاكي للأجهزة الحقيقية ARM64 (أغلب هواتف أندرويد الحديثة)
